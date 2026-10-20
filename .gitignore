@@ -1,0 +1,9 @@
+.env
+.env.*
+!.env.example
+.svn/
+.DS_Store
+__pycache__/
+*.pyc
+/vendor/
+/node_modules/

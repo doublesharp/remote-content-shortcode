@@ -1,0 +1,107 @@
+name: Publish to WordPress SVN
+
+on:
+  push:
+    tags: ['[0-9]*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wordpress-svn-release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    uses: ./.github/workflows/validate.yml
+
+  publish:
+    name: ${{ github.event_name == 'workflow_dispatch' && 'SVN dry run' || 'SVN release' }}
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Validate release version and branch
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if [ "$EVENT_NAME" = push ]; then
+            VERSION=$(python3 tools/release-version.py --tag "$RELEASE_TAG")
+          else
+            VERSION=$(python3 tools/release-version.py)
+          fi
+          git merge-base --is-ancestor HEAD origin/main
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Ensure this version is new in SVN
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if ! command -v svn >/dev/null; then
+            timeout 120 sudo apt-get update
+            timeout 120 sudo apt-get install -y subversion
+          fi
+          timeout 60 svn list --xml --non-interactive \
+            https://plugins.svn.wordpress.org/remote-content-shortcode/tags/ > "$RUNNER_TEMP/svn-tags.xml"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          tags = ET.parse(Path(os.environ['RUNNER_TEMP']) / 'svn-tags.xml')
+          if any(name.text == os.environ['VERSION'] for name in tags.findall('.//entry/name')):
+              raise SystemExit('This SVN version already exists. Choose a new version; releases are not overwritten.')
+          PY
+      - name: Build the release ZIP in Docker
+        run: |
+          mkdir -p "$RUNNER_TEMP/rcs-release"
+          timeout 120 docker pull wordpress:cli-php8.2
+          timeout 30 docker run --rm --user "$(id -u):$(id -g)" \
+            -e GITHUB_ACTIONS=true -e RUNNER_TEMP \
+            -v "$GITHUB_WORKSPACE:/source:ro" -v "$RUNNER_TEMP:$RUNNER_TEMP" \
+            --entrypoint php wordpress:cli-php8.2 \
+            /source/tools/package.php "$RUNNER_TEMP/rcs-release/plugin.zip"
+          unzip -q "$RUNNER_TEMP/rcs-release/plugin.zip" -d "$RUNNER_TEMP/rcs-release"
+      - name: Check deployment configuration
+        env:
+          SVN_USERNAME: ${{ vars.SVN_USERNAME }}
+          SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}
+          SLUG: ${{ vars.PLUGIN_SLUG }}
+        run: |
+          test "$SLUG" = remote-content-shortcode
+          test -n "$SVN_USERNAME"
+          test -n "$SVN_PASSWORD"
+      - name: Deploy the packaged files to SVN
+        uses: 10up/action-wordpress-plugin-deploy@54bd289b8525fd23a5c365ec369185f2966529c2 # 2.3.0
+        with:
+          dry-run: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          SVN_USERNAME: ${{ vars.SVN_USERNAME }}
+          SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}
+          SLUG: ${{ vars.PLUGIN_SLUG }}
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD_DIR: ${{ runner.temp }}/rcs-release/remote-content-shortcode
+      - name: Verify the published SVN tag matches the package
+        if: github.event_name == 'push'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          timeout 60 svn export --non-interactive \
+            "https://plugins.svn.wordpress.org/remote-content-shortcode/tags/$VERSION" \
+            "$RUNNER_TEMP/rcs-svn-verify"
+          diff -qr "$RUNNER_TEMP/rcs-release/remote-content-shortcode" "$RUNNER_TEMP/rcs-svn-verify"
+      - name: Record deployment result
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            echo "SVN dry run completed for $VERSION. No SVN commit was made." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Version $VERSION uploaded to WordPress SVN. Directory reopening and release confirmation are separate." >> "$GITHUB_STEP_SUMMARY"
+          fi

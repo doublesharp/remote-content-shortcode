@@ -1,0 +1,14 @@
+Bundled dependency
+
+Symfony CssSelector v7.4.18 is included under `inc/vendor/css-selector/`.
+
+- Upstream: https://github.com/symfony/css-selector
+- Locked revision: `fecf40067fc8d8880ea87b8ac227600b9aadd1d0`
+- License: MIT, included at `inc/vendor/css-selector/LICENSE`
+- Runtime requirement: PHP 8.2 or later
+
+The distributed PHP files retain their upstream copyright notices. The only source change is replacing the namespace `Symfony\Component\CssSelector` with `RemoteContentShortcode\Vendor\Symfony\Component\CssSelector`. This prevents conflicts with other plugins' Symfony dependencies. The original phpQuery library has been removed.
+
+The Composer manifest and lock file identify the original source. `tools/build-css-selector.php` reproduces the namespace substitution from that locked package's source directory. No source code is minified or obfuscated.
+
+Composer is not required on the WordPress host. The release does not load a shared Composer autoloader; the HTML adapter loads only this plugin's isolated classes.

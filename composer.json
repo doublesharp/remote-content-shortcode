@@ -1,0 +1,17 @@
+{
+    "name": "doublesharp/remote-content-shortcode",
+    "description": "Safely embed remote content in WordPress posts using a shortcode.",
+    "type": "wordpress-plugin",
+    "license": "GPL-2.0-or-later",
+    "require": {
+        "php": ">=8.2",
+        "ext-curl": "*",
+        "ext-dom": "*",
+        "symfony/css-selector": "^7.4"
+    },
+    "config": {
+        "platform": { "php": "8.2.0" },
+        "allow-plugins": false,
+        "sort-packages": true
+    }
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://schemas.wp.org/trunk/block.json",
+  "apiVersion": 3,
+  "name": "remote-content-shortcode/remote-content",
+  "version": "2.0",
+  "title": "Remote content",
+  "category": "widgets",
+  "icon": "download",
+  "description": "Embed public remote HTML with CSS selectors.",
+  "textdomain": "remote-content-shortcode",
+  "attributes": {
+    "url": {"type":"string","default":""},
+    "selector": {"type":"string","default":""},
+    "remove": {"type":"string","default":""},
+    "fallback": {"type":"string","default":""},
+    "userpwd": {"type":"string","default":""},
+    "cache": {"type":"boolean","default":true},
+    "cacheTtl": {"type":"number","default":3600},
+    "staleTtl": {"type":"number","default":0},
+    "rewriteUrls": {"type":"boolean","default":false},
+    "timeout": {"type":"number","default":10}
+  },
+  "supports": {"html":false},
+  "editorScript": "file:./editor.js"
+}
