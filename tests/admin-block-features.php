@@ -51,15 +51,15 @@ $page_user = get_current_user_id();
 $buffer_level = ob_get_level();
 try {
 	wp_set_current_user( 1 );
-	$_POST = array( 'rcs_action' => 'test', '_wpnonce' => wp_create_nonce( 'rcs_tools' ), 'url' => 'http://name:secret@127.0.0.1/?token=private-marker', 'cache' => 'false' );
+	$_POST = array( 'rcs_action' => 'test', '_wpnonce' => wp_create_nonce( 'rcs_tools' ), 'url' => 'http://name:page-private-password@127.0.0.1/?token=private-marker', 'cache' => 'false' );
 	$_REQUEST = $_POST;
 	$_SERVER['REQUEST_METHOD'] = 'POST';
 	ob_start();
 	Remote_Content_Shortcode_Admin::page();
 	$page_html = ob_get_clean();
-	rcs_ab_assert( ! preg_match( '/name="(?:cache|cache_ttl|stale_ttl)"/', $page_html ), 'Administrator test form offers ineffective cache settings.' );
+	rcs_ab_assert( preg_match( '/name="cache_ttl"/', $page_html ) && str_contains( $page_html, 'value="generate"' ), 'Builder must include cache settings for the generated shortcode.' );
 	rcs_ab_assert( str_contains( $page_html, esc_html__( 'Test requests fetch fresh content and bypass visitor caching. Cache settings belong in the shortcode or block.', 'remote-content-shortcode' ) ), 'Administrator test form does not explain cache bypass.' );
-	rcs_ab_assert( ! str_contains( $page_html, 'secret' ) && ! str_contains( $page_html, 'private-marker' ) && ! str_contains( $page_html, '127.0.0.1' ), 'Admin page echoed source URL secrets.' );
+	rcs_ab_assert( ! str_contains( $page_html, 'page-private-password' ) && ! str_contains( $page_html, 'private-marker' ) && ! str_contains( $page_html, '127.0.0.1' ), 'Admin page echoed source URL secrets.' );
 	foreach ( array( 'Successful import', 'Error code', 'HTTP status', 'Cache', 'Matching elements', 'Elapsed time (ms)', 'Not available' ) as $label ) {
 		rcs_ab_assert( str_contains( $page_html, esc_html( __( $label, 'remote-content-shortcode' ) ) ), 'Admin page omitted readable diagnostic label.' );
 	}

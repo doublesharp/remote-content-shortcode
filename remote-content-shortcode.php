@@ -28,6 +28,8 @@ if ( version_compare( PHP_VERSION, '8.2', '<' ) || ! extension_loaded( 'dom' ) |
 
 if ( ! class_exists( 'RemoteContentShortcode' ) ) {
 	require_once __DIR__ . '/inc/class-remote-content-cache.php';
+	require_once __DIR__ . '/inc/class-remote-content-secrets.php';
+	require_once __DIR__ . '/inc/class-remote-content-connections.php';
 	require_once __DIR__ . '/inc/class-remote-content-credentials.php';
 	require_once __DIR__ . '/inc/class-remote-content-admin.php';
 	require_once __DIR__ . '/inc/class-remote-content-block.php';
@@ -44,6 +46,7 @@ if ( ! class_exists( 'RemoteContentShortcode' ) ) {
 				self::$instance = new self();
 				self::$instance->add_shortcode();
 				self::$instance->add_filters();
+				Remote_Content_Shortcode_Connections::register();
 				Remote_Content_Shortcode_Admin::register();
 				Remote_Content_Shortcode_Block::register();
 			}
@@ -65,11 +68,11 @@ if ( ! class_exists( 'RemoteContentShortcode' ) ) {
 		}
 
 		/** Return bounded, redacted diagnostics, never raw request errors or URLs. */
-		public function diagnose( $atts ) {
+		public function diagnose( $atts, $content = null ) {
 			if ( ! current_user_can( 'manage_options' ) ) { return new WP_Error( 'forbidden' ); }
 			if ( ! is_array( $atts ) ) { return new WP_Error( 'invalid_attributes' ); }
 			$atts['timeout'] = max( 1, min( 5, is_scalar( $atts['timeout'] ?? 5 ) ? (int) ( $atts['timeout'] ?? 5 ) : 5 ) );
-			$html = $this->remote_content_shortcode( $atts );
+			$html = $this->remote_content_shortcode( $atts, $content );
 			return $this->last_result + array( 'html' => $html );
 		}
 
@@ -121,15 +124,59 @@ if ( ! class_exists( 'RemoteContentShortcode' ) ) {
 			return $atts;
 		}
 
-		private function render_shortcode( $atts, $content ) {
+
+		/** Shared public transport for add-ons: all destinations and credentials use the core policy. */
+		public function fetch_source( $attributes, $content = null, $content_filters = true ) {
+			$atts = $this->normalize_attributes( $attributes );
+			if ( is_wp_error( $atts ) ) { return $atts; }
+			$atts = $this->attributes( $atts );
+			$method = strtoupper( (string) $atts['method'] );
+			if ( ! in_array( $method, array( 'GET', 'POST' ), true ) ) { return new WP_Error( 'invalid_method' ); }
+			$url = $content_filters ? $this->forward_params( str_replace( '&amp;', '&', (string) $atts['url'] ), (string) $atts['params'] ) : (string) $atts['url'];
+			if ( is_wp_error( $url ) ) { return $url; }
+			$url = $this->canonical_url( $content_filters ? apply_filters( 'remote_content_shortcode_url', $url ) : $url );
+			if ( '' === $url ) { return new WP_Error( 'invalid_url' ); }
+			$content = null === $content && isset( $atts['body'] ) ? $atts['body'] : $content;
+			$body = $content_filters ? apply_filters( 'remote_content_shortcode_postfields', $content, $url ) : $content;
+			if ( null !== $body && ! is_string( $body ) ) { return new WP_Error( 'invalid_post_body' ); }
+			if ( strlen( (string) $body ) > self::MAX_BYTES ) { return new WP_Error( 'post_body_too_large' ); }
+			$args = array( 'method' => $method, 'timeout' => max( 1, min( 30, (int) $atts['timeout'] ) ), 'sslverify' => true, 'redirection' => 0, 'limit_response_size' => self::MAX_BYTES, 'cookies' => array() );
+			if ( 'POST' === $method ) { $args['body'] = (string) $body; }
+			if ( '' !== (string) $atts['userpwd'] ) {
+				$headers = $this->credential( (string) $atts['userpwd'], $url, $method );
+				if ( is_wp_error( $headers ) ) { return $headers; }
+				$args['headers'] = $headers;
+			}
+			return $this->request( $url, $args );
+		}
+
+		/** Render a previously verified response through the same bounded output pipeline. */
+		public function render_fetched( $response, $attributes ) {
+			$this->last_result = array( 'ok' => false, 'error_code' => '', 'http_status' => null, 'cache_status' => 'snapshot', 'selector_matches' => null, 'duration_ms' => 0 );
+			$atts = $this->normalize_attributes( $attributes );
 			if ( is_wp_error( $atts ) ) { return $this->fail( $atts ); }
+			$atts = $this->attributes( $atts );
+			if ( ! is_array( $response ) || ! is_string( $response['body'] ?? null ) || strlen( $response['body'] ) >= self::MAX_BYTES || ! is_string( $response['url'] ?? null ) ) { return $this->fail( 'invalid_output' ); }
+			$url = $this->canonical_url( $response['url'] );
+			if ( '' === $url ) { return $this->fail( 'invalid_url_base' ); }
+			$response['url'] = $url;
+			return $this->transform_response( $response, $atts, $url );
+		}
+
+		private function attributes( $atts ) {
 			$atts = shortcode_atts( array(
 				'userpwd' => '', 'method' => 'GET', 'timeout' => 10, 'url' => '',
 				'selector' => '', 'remove' => '', 'find' => '', 'replace' => '',
 				'htmlentities' => 'false', 'params' => '', 'strip_tags' => 'false',
-				'cache' => 'true', 'cache_ttl' => 3600, 'stale_ttl' => 0,
+				'body' => '', 'cache' => 'true', 'cache_ttl' => 3600, 'stale_ttl' => 0,
 				'rewrite_urls' => 'false', 'fallback' => '',
 			), $atts );
+			return $atts;
+		}
+
+		private function render_shortcode( $atts, $content ) {
+			if ( is_wp_error( $atts ) ) { return $this->fail( $atts ); }
+			$atts = $this->attributes( $atts );
 			$method = strtoupper( (string) $atts['method'] );
 			if ( ! in_array( $method, array( 'GET', 'POST' ), true ) ) {
 				return $this->fail( 'invalid_method' );
@@ -190,6 +237,10 @@ if ( ! class_exists( 'RemoteContentShortcode' ) ) {
 				$response = $stale;
 				$this->last_result['cache_status'] = 'stale';
 			}
+			return $this->transform_response( $response, $atts, $url );
+		}
+
+		private function transform_response( $response, $atts, $url ) {
 			$effective_url = $response['url'];
 			if ( 'stale' !== $this->last_result['cache_status'] ) { $this->last_result['http_status'] = $response['status'] ?? 200; }
 			$response = $response['body'];

@@ -1,5 +1,5 @@
 <?php
-/** Remove only Remote Content Shortcode's bounded public-response cache. */
+/** Remove Remote Content Shortcode's cache and administrator-managed connections. */
 if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) { exit; }
 
 /** Backend changes can leave transient rows behind, so remove both representations. */
@@ -26,6 +26,7 @@ function remote_content_shortcode_uninstall_cache_site() {
 	} while ( 100 === count( $names ) && $removed > 0 );
 	delete_option( 'rcs_v2_cache_index' );
 	delete_option( 'rcs_v2_cache_lock' );
+	delete_option( 'rcs_connections_v1' );
 }
 
 if ( is_multisite() ) {

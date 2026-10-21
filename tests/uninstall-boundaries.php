@@ -5,12 +5,17 @@ function ub_assert( $ok, $message ) { if ( ! $ok ) { throw new RuntimeException(
 $root = dirname( getenv( 'RCS_PLUGIN_FILE' ) );
 $valid = 'rcs_v2_' . hash( 'sha256', 'uninstall-boundary' );
 set_transient( $valid, 'owned', 120 );
+update_option( 'rcs_connections_v1', array( 'owned' => 'sealed-credential' ), false );
+update_option( 'php_external_credentials', 'preserved', false );
 set_transient( 'uninstall_other_plugin', 'preserved', 120 );
 update_option( 'rcs_v2_cache_index', array( $valid => array(), 'uninstall_other_plugin' => array(), 7 => array() ), false );
 // More than 100 orphan rows require another SQL discovery batch.
 for ( $i = 0; $i < 110; ++$i ) { add_option( '_transient_rcs_v2_orphan_' . $i, 'owned', '', false ); }
 define( 'WP_UNINSTALL_PLUGIN', 'remote-content-shortcode/remote-content-shortcode.php' );
 require $root . '/uninstall.php';
+ub_assert( false === get_option( 'rcs_connections_v1', false ), 'Managed connections survived uninstall.' );
+ub_assert( 'preserved' === get_option( 'php_external_credentials' ), 'Externally configured credential storage was removed.' );
+delete_option( 'php_external_credentials' );
 ub_assert( false === get_transient( $valid ), 'Indexed payload survived uninstall.' );
 for ( $i = 0; $i < 110; ++$i ) { ub_assert( false === get_option( '_transient_rcs_v2_orphan_' . $i, false ), 'An orphan batch survived uninstall.' ); }
 ub_assert( 'preserved' === get_transient( 'uninstall_other_plugin' ), 'Malformed index deleted another plugin transient.' );

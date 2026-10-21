@@ -18,6 +18,8 @@ class Remote_Content_Shortcode_Credentials {
 		$key = $source['key'] ?? null;
 		if ( ! is_string( $key ) || '' === $key ) { return new WP_Error( 'invalid_credentials' ); }
 		switch ( $source['type'] ?? '' ) {
+			case 'connection': $value = Remote_Content_Shortcode_Connections::secret( $key, $source ); break;
+			case 'provider': $value = apply_filters( 'remote_content_shortcode_credential_value', new WP_Error( 'invalid_credentials' ), $source, $url, $method ); break;
 			case 'constant': $value = defined( $key ) ? constant( $key ) : false; break;
 			case 'option': $value = get_option( $key ); break;
 			case 'post_meta':
@@ -34,6 +36,7 @@ class Remote_Content_Shortcode_Credentials {
 				break;
 			default: return new WP_Error( 'invalid_credentials' );
 		}
+		if ( is_wp_error( $value ) ) { return $value; }
 		if ( ! is_string( $value ) || '' === $value || strlen( $value ) > 8192 || preg_match( '/[\x00-\x1f\x7f]/', $value ) ) { return new WP_Error( 'invalid_credentials' ); }
 		switch ( $source['auth'] ?? 'basic' ) {
 			case 'basic': return str_contains( $value, ':' ) ? array( 'Authorization' => 'Basic ' . base64_encode( $value ) ) : new WP_Error( 'invalid_credentials' );
