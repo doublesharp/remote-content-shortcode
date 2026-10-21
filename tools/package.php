@@ -14,7 +14,7 @@ if ( ! $allowed || ! str_ends_with( $output, '.zip' ) ) {
 	exit( 1 );
 }
 $root = dirname( __DIR__ );
-$files = array( 'remote-content-shortcode.php', 'readme.txt', 'LICENSE.txt', 'third-party.txt', 'composer.json', 'composer.lock', 'SECURITY.md', 'docs/security.md', 'docs/troubleshooting.md', 'docs/upgrading.md', 'uninstall.php' );
+$files = array( 'remote-content-shortcode.php', 'readme.txt', 'LICENSE.txt', 'third-party.txt', 'composer.json', 'composer.lock', 'SECURITY.md', 'docs/integrations.md', 'docs/security.md', 'docs/troubleshooting.md', 'docs/upgrading.md', 'uninstall.php' );
 foreach ( new RecursiveIteratorIterator( new RecursiveDirectoryIterator( $root . '/inc', FilesystemIterator::SKIP_DOTS ) ) as $file ) {
 	if ( $file->isFile() && ! $file->isLink() ) {
 		$files[] = substr( $file->getPathname(), strlen( $root ) + 1 );

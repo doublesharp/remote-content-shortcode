@@ -48,9 +48,17 @@ Attributes:
 
 Insert the Remote content block and set its source URL, selectors, removal rule, fallback, credential alias, URL rewriting, and cache options in the block settings. The block imports with GET. Use the shortcode for POST requests. Editor previews can make remote requests and use the same security restrictions as frontend rendering. Store only a configured credential alias in a block, never a password or token.
 
-Administrators can open Tools > Remote content to test an import. Diagnostics show HTTP status, cache status, selector match count, elapsed time, and a sanitized preview. Administrator tests bypass caching and show a disabled cache status; they do not measure whether visitors have a cached response. Raw request error messages, credential values, and destination URLs are excluded from diagnostic output. Test requests use a timeout of at most five seconds, plus system DNS resolution time. Inputs are cleared after submission so URLs and aliases are not echoed back.
+Administrators can open Tools > Remote content > Builder to generate a copyable shortcode or test an import. Diagnostics show HTTP status, cache status, selector match count, elapsed time, a sanitized preview and its HTML source. Administrator tests bypass caching and show a disabled cache status; they do not measure whether visitors have a cached response. Raw request error messages, credential values, and destination URLs are excluded from diagnostic output. Test requests use a timeout of at most five seconds, plus system DNS resolution time. Diagnostic input fields are cleared after submission. The generated shortcode intentionally contains the public settings entered for copying; do not include secrets in URLs, attributes or POST bodies.
 
-The same screen can clear entries for an exact source URL, including its query string, or clear all of this plugin's cache entries. Other WordPress caches are unaffected. The URL is normalized before matching; use the actual URL after any shortcode URL filter and forwarded parameters.
+The Connections tab manages encrypted credential aliases. The Cache tab displays active indexed entries and byte totals and can clear an exact source URL, including its query string, or all of this plugin's cache entries. Other WordPress caches are unaffected. The URL is normalized before matching; use the actual URL after any shortcode URL filter and forwarded parameters.
+
+The Usage tab lists local posts and pages containing the shortcode or block, 20 at a time. It never fetches sources or displays post content. Help includes a copyable environment summary without source URLs, credential names or content. Every tab is administrator-only.
+
+= Free and Pro =
+
+The shortcode, block, selection/removal, replacements, persistent public GET caching, stale fallback, relative URL rewriting, Basic/Bearer/API-key authentication and all five Tools tabs remain in Free. Free works on its own and contains no licensing client or licensing-service dependency.
+
+Remote Content Shortcode Pro installs separately and adds reusable sources, scheduled refreshes, OAuth and source management. Its installed features continue to work without an active update license. Add-ons use Free's protected transport and sanitized HTML pipeline rather than bypassing their restrictions.
 
 = POST example =
 
@@ -60,7 +68,11 @@ Configure authenticated POST access explicitly if an endpoint requires credentia
 
 = Authentication =
 
-Administrators configure aliases in trusted server-side code, for example an mu-plugin. Each alias grants shortcode authors access to one HTTPS endpoint. Its fetched content will be visible to anyone who can view the post, including logged-out visitors. Authentication does not make imported content private.
+Administrators can save up to 32 connections per site in Tools > Remote content > Connections. Choose Basic, Bearer or API-key authentication, an HTTPS origin, an exact endpoint path and GET and/or POST. Secrets are never shown in the form. Leave a secret blank to retain it, replace it by entering a new value, or select Remove saved secret. Basic authentication expects username:password. Save and delete require administrator permission and a valid form nonce.
+
+Saved secrets use authenticated encryption, with Sodium preferred and AES-256-GCM as a fallback. The encryption key is derived from the WordPress salts. Rotating those salts makes existing sealed credentials unreadable; back up the salts with the database and re-enter connection secrets after rotation. Storage fails when authenticated encryption is unavailable; secrets are never saved as plaintext.
+
+Administrators can also configure aliases in trusted server-side code, for example an mu-plugin. Code-managed aliases take precedence and appear as read only; their option/constant names and endpoint scope are not shown in the Connections list. Each alias grants shortcode authors access to one HTTPS endpoint. Its fetched content will be visible to anyone who can view the post, including logged-out visitors. Authentication does not make imported content private.
 
 Example configuration, with a `DOCS_API_CREDENTIALS` constant set separately to a `username:password` string:
 
@@ -102,13 +114,17 @@ CSS work limits are conservative. With no removal selector, `main p` permits at 
 
 URL rewriting covers only href, src, poster, cite, and ordinary srcset attributes. It drops URL values containing literal whitespace instead of guessing an encoding. Form actions, CSS backgrounds, the background attribute, and longdesc are not rewritten.
 
-The installed plugin includes `docs/security.md` with the full security and compatibility reference. Removing the plugin deletes its own cached data and metadata, including on multisite, without deleting credential sources or unrelated WordPress caches.
+The installed plugin includes `docs/security.md` with the full security and compatibility reference. Uninstalling deletes its cached data, metadata and administrator-managed connection records on each site, including multisite. It retains PHP-configured constants, external credential options and protected metadata, and unrelated WordPress caches. Deactivation preserves settings.
 
 = Developer hooks =
 
 The existing `remote_content_shortcode_url`, `remote_content_shortcode_postfields`, `remote_content_shortcode_phpQuery`, and `remote_content_shortcode_return` filters remain available. The phpQuery-named hook is a compatibility hook for the HTML string before selection; it no longer uses phpQuery. Return-filter output is always sanitized afterward.
 
 `remote_content_shortcode_credentials` configures credential aliases. The `remote_content_shortcode_error` action receives a WP_Error and the requested URL for server-side diagnostics. Diagnostic listeners must protect any sensitive data in URLs and must not print raw errors to visitors.
+
+`remote_content_shortcode_admin_tabs` extends the administrator tab map, and `remote_content_shortcode_admin_tab_SLUG` renders an extension tab after the screen's administrator check. Extension actions remain responsible for their own POST nonce and permission checks. Labels are escaped and tab slugs accept only a leading lowercase letter followed by lowercase letters, digits, underscores or hyphens, up to 64 characters.
+
+`RemoteContentShortcode::get_instance()->fetch_source($attributes, $content = null, $content_filters = true)` fetches an uncached response with the core destination, credential, DNS pinning, TLS and size rules. It returns an array with body, final url and status, or WP_Error. Set content_filters to false for a stored source that must ignore request-context query forwarding and the URL/POST-body content filters. `render_fetched($response, $attributes)` transforms a previously verified response through the same selectors, replacements and final HTML sanitization without fetching it again. Raw fetch results are not safe HTML. See docs/integrations.md for examples and provider credentials.
 
 The former SSL verification filters and the local draft's `REMOTE_CONTENT_ALLOW_ALL_URLS` and `REMOTE_CONTENT_ALLOW_PRIVATE_IPS` constants are not supported. TLS verification and public-destination restrictions cannot be disabled through this plugin.
 
@@ -151,6 +167,8 @@ Security update. Requires WordPress 6.6 and PHP 8.2 with DOM and cURL. HTML is s
 == Changelog ==
 
 = 2.0 =
+* Add a Free shortcode builder, encrypted connection manager, cache summary, usage lookup and support summary under Tools > Remote content.
+* Expose protected fetch and snapshot-rendering APIs and administrator tab hooks for separate add-ons, with no Free licensing dependency.
 * Fix CVE-2023-45652, local file inclusion; CVE-2024-2089, stored cross-site scripting; and CVE-2024-2090, server-side request forgery.
 * Decode entity-encoded fallback attributes consistently, simplify administrator test controls, and add troubleshooting and upgrade guides.
 * Sanitize all rendered remote HTML, including replacement and filter output.

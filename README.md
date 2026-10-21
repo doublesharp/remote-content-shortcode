@@ -18,7 +18,7 @@ Bring selected content from another site into WordPress. Choose the elements to 
 - **Keep links working.** Resolve relative links and image URLs against the remote page's final URL with `rewrite_urls="true"`.
 - **Control the result.** Replace text with regular expressions, strip HTML, display escaped source, or provide fallback content.
 - **Connect to APIs.** Send GET or POST requests and use administrator-configured Basic, Bearer, or API-key credentials.
-- **Inspect imports.** Test a URL, preview sanitized output, see matching element counts, and clear this plugin's cache under **Tools → Remote content**.
+- **Build and inspect imports.** Generate a copyable shortcode, preview sanitized output, manage credential aliases, inspect cache totals, and find local usage under **Tools → Remote content**.
 
 ## Quick start
 
@@ -101,7 +101,11 @@ See [readme.txt](readme.txt) for the complete attribute reference, transformatio
 
 ## Authentication
 
-The `userpwd` attribute names a server-configured alias. Passwords and tokens belong in trusted server-side storage, outside post content.
+The `userpwd` attribute names an administrator-configured alias. Open **Tools → Remote content → Connections** to save a Basic credential, Bearer token, or API key. Each connection grants access to an exact HTTPS origin, path, and allowed HTTP methods. Password fields stay blank; leaving one blank retains its existing secret. Use the explicit removal checkbox to erase a saved secret.
+
+Managed secrets are encrypted with authenticated encryption derived from the WordPress salts. Changing those salts makes existing sealed credentials unreadable. Back up the salts with your database, and re-enter the connection secrets after a deliberate salt rotation. If neither Sodium nor AES-256-GCM is available, credential storage fails without saving plaintext.
+
+Aliases can also be configured in trusted PHP code. These entries appear as read only in Connections, and their storage names and scope are omitted from that list. Passwords and tokens belong outside post content.
 
 For example, with a `DOCS_API_TOKEN` constant defined separately, add this configuration in an mu-plugin:
 
@@ -127,6 +131,22 @@ Then reference the alias:
 Aliases are bound to an HTTPS origin, an exact normalized endpoint path, and permitted methods. GET is allowed by default; POST requires an explicit grant. Basic and API-key authentication and option/protected-metadata storage are also supported. Authenticated responses are never cached and cannot follow redirects.
 
 An alias grants shortcode authors access to its endpoint. Anyone who can view the resulting post can view its imported content. Use credentials intended for publishing that data. See [credential configuration and restrictions](docs/security.md#credentials-and-forwarded-data).
+
+## Tools and add-ons
+
+**Tools → Remote content** has five Free tabs:
+
+- **Builder** generates a shortcode from public settings, tests the request, and shows sanitized preview HTML. POST bodies entered here become post content when the generated shortcode is copied.
+- **Connections** stores up to 32 encrypted credential aliases per site and lists read-only PHP aliases.
+- **Cache** shows active indexed entry and byte totals and clears an exact source URL or all plugin entries.
+- **Usage** lists local posts and pages containing the shortcode or block, 20 at a time. It does not fetch sources or display post content.
+- **Help** includes a copyable environment summary without source URLs, credentials or content.
+
+The shortcode, block, selectors, public GET cache, stale fallback, URL rewriting, Basic/Bearer/API-key connections and all five tabs are part of Free. Free works independently and has no license client or licensing-service dependency.
+
+Remote Content Shortcode Pro is a separate add-on for reusable sources, scheduled refreshes, OAuth and source management. It uses Free's protected fetching and HTML transformations. Installed Pro features continue to run without an active update license. See [the extension APIs and hooks](docs/integrations.md) for PHP integrations.
+
+Uninstalling Free removes its cached data and administrator-managed connection records on each site. PHP-configured credential constants, external options, protected metadata and unrelated caches are retained. Deactivation preserves the settings.
 
 ## Security and compatibility
 
