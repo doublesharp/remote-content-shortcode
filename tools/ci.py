@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import secrets
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -18,7 +19,17 @@ else:
     if not Path('/Volumes/Scratch').is_mount():
         sys.exit('Scratch must be mounted before running local Docker checks.')
     BASE = Path('/Volumes/Scratch/remote-content-shortcode')
-REPORTS = BASE / 'reports' if IN_ACTIONS else BASE / 'reports/github-ci'
+REPORTS = Path(os.environ.get('RCS_REPORT_DIR', str(BASE / 'reports' if IN_ACTIONS else BASE / 'reports/github-ci'))).resolve()
+allowed_roots = [Path('/Volumes/Scratch/remote-content-shortcode')]
+if IN_ACTIONS:
+    allowed_roots.append(Path(os.environ['RUNNER_TEMP']).resolve())
+if not any(root in REPORTS.parents for root in allowed_roots):
+    sys.exit('Reports must be under this project\'s Scratch directory or GitHub RUNNER_TEMP.')
+COVERAGE = Path(os.environ['RCS_COVERAGE_DIR']).resolve() if os.environ.get('RCS_COVERAGE_DIR') else None
+if COVERAGE and (not any(root in COVERAGE.parents for root in allowed_roots)
+                 or not all((COVERAGE / name).is_file() for name in ('prepend.php', 'files.json'))):
+    sys.exit('Coverage inputs must be prepared under Scratch or GitHub RUNNER_TEMP.')
+FAULT_TESTS = os.environ.get('RCS_FAULT_TESTS') == '1'
 WORK = BASE / 'tmp' / ('ci-' + secrets.token_hex(4))
 REPORTS.mkdir(parents=True, exist_ok=True)
 WORK.mkdir(parents=True)
@@ -27,7 +38,7 @@ WORDPRESS = os.environ.get('RCS_WORDPRESS_VERSION', '7.1.3')
 PHP = os.environ.get('RCS_PHP_VERSION', '8.2')
 if PHP not in ('8.2', '8.5') or WORDPRESS not in ('6.6', '7.1.3'):
     sys.exit('Use one of the WordPress/PHP versions configured in validate.yml.')
-IMAGE = 'wordpress:cli-php' + PHP
+IMAGE = os.environ.get('RCS_TEST_IMAGE', 'wordpress:cli-php' + PHP)
 PREFIX = 'remote-content-ci-' + secrets.token_hex(4)
 NETWORK = PREFIX + '-net'
 SERVICES = []
@@ -49,6 +60,7 @@ def check(name, arguments, timeout=30, environment=None, isolated=True):
     """The watchdog also removes the container when a test reaches its deadline."""
     log = REPORTS / (name + '.txt')
     container = PREFIX + '-' + name
+    SERVICES.append(container)
     docker = ['--user', f'{os.getuid()}:{os.getgid()}',
               '-v', f'{SOURCE}:/source:ro', '-v', f'{WP}:/wordpress',
               '-v', f'{WORK}:/work', '-v', f'{REPORTS}:/reports',
@@ -56,6 +68,23 @@ def check(name, arguments, timeout=30, environment=None, isolated=True):
               '-e', 'RCS_PLUGIN_FILE=/wordpress/wp-content/plugins/remote-content-shortcode/remote-content-shortcode.php']
     if isolated:
         docker += ['--network', NETWORK, '--dns', '11.231.47.10']
+    covered = (name.endswith('dependency-failures') or name.endswith('-boundaries')
+               or name.startswith(('selector-', 'startup-')) or name in {
+                   'upgrade-verify', 'cve-regression', 'encoded-fallback', 'regression',
+                   'integration-transport', 'features-integration', 'content-auth-features',
+                   'cache-features', 'admin-block-features', 'transport', 'anonymous-rest-cache',
+                   'render-contexts', 'proxy-transport', 'cache-write', 'cache-read',
+                   'cache-uninstall', 'regex-budget', 'cache-multisite'})
+    if arguments[0] == 'php':
+        fault = name.endswith('dependency-failures') or name.startswith('startup-')
+        # uopz changes compiler indices, so coverage and opcode capture use one mode.
+        enabled = fault or (COVERAGE and covered)
+        arguments = [arguments[0], '-d', 'uopz.disable=' + ('0' if enabled else '1'), *arguments[1:]]
+        if COVERAGE and covered:
+            docker += ['-v', f'{COVERAGE}:/coverage:ro', '-e', 'XDEBUG_MODE=coverage',
+                       '-e', 'RCS_COVERAGE_CASE=' + name]
+            arguments = [arguments[0], '-d', 'auto_prepend_file=/coverage/prepend.php',
+                         '-d', 'opcache.enable_cli=0', *arguments[1:]]
     for key, value in (environment or {}).items():
         docker += ['-e', f'{key}={value}']
     try:
@@ -65,10 +94,20 @@ def check(name, arguments, timeout=30, environment=None, isolated=True):
     finally:
         if log.exists():
             print(log.read_text(), flush=True)
+        # Also handles termination of the outer coverage runner.
+        subprocess.run(['docker', 'rm', '-f', container], capture_output=True, timeout=10)
+        SERVICES.remove(container)
 
 
 def wp(name, arguments, **options):
     check(name, ['php', '-d', 'memory_limit=256M', '/usr/local/bin/wp', '--allow-root', '--path=/wordpress', *arguments], **options)
+
+
+def terminate(signum, frame):
+    raise SystemExit(124)
+
+
+signal.signal(signal.SIGTERM, terminate)
 
 
 try:
@@ -77,7 +116,8 @@ try:
                  'composer.json', 'composer.lock', 'SECURITY.md', 'uninstall.php', 'inc', 'blocks', 'docs', 'tests', 'tools'):
         source = ROOT / name
         if source.is_dir():
-            shutil.copytree(source, SOURCE / name, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+            shutil.copytree(source, SOURCE / name, ignore=shutil.ignore_patterns(
+                '__pycache__', '*.pyc', '.env', '.env.*', '.git', '.svn', 'node_modules'))
         else:
             shutil.copy2(source, SOURCE / name)
     for image in (IMAGE, 'mariadb:10.6.19', 'python:3.13-alpine'):
@@ -143,18 +183,35 @@ try:
     wp('encoded-fallback', ['eval-file', '/source/tests/encoded-fallback.php'])
     wp('install-plugin-check', ['plugin', 'install', '/work/plugin-check.zip', '--activate'])
     for suite in ('regression', 'integration-transport', 'features-integration', 'content-auth-features',
-                  'cache-features', 'admin-block-features', 'transport'):
+                  'cache-features', 'admin-block-features', 'transport', 'content-boundaries',
+                  'admin-cache-boundaries', 'renderer-boundaries', 'transport-boundaries'):
         wp(suite, ['eval-file', f'/source/tests/{suite}.php'])
+    if FAULT_TESTS:
+        for suite in ('dependency-failures', 'transport-dependency-failures'):
+            wp(suite, ['eval-file', f'/source/tests/{suite}.php'])
     wp('anonymous-rest-cache', ['--exec=define("REST_REQUEST", true);', 'eval-file', '/source/tests/anonymous-rest-cache.php'])
     wp('render-contexts', ['--exec=define("WP_ADMIN", true);', 'eval-file', '/source/tests/render-contexts.php'])
+    wp('proxy-transport', ['--exec=define("WP_PROXY_HOST", "127.0.0.1"); define("WP_PROXY_PORT", 9); define("WP_PROXY_BYPASS_HOSTS", "source.rcs.test");', 'eval-file', '/source/tests/proxy-transport.php'])
     for phase in ('write', 'read', 'uninstall'):
         wp('cache-' + phase, ['eval-file', '/source/tests/cache-features.php'], environment={'RCS_CACHE_PHASE': phase})
+    wp('uninstall-boundaries', ['eval-file', '/source/tests/uninstall-boundaries.php'])
+    check('selector-autoload', ['php', '/source/tests/selector-autoload.php'], timeout=5)
+    if FAULT_TESTS:
+        for case in ('direct-main', 'direct-html', 'direct-regex', 'missing-dom', 'missing-curl', 'missing-connect-option'):
+            check('startup-' + case, ['php', '/source/tests/startup-failures.php'], timeout=5,
+                  environment={'RCS_STARTUP_CASE': case})
     for case in ('small-select', 'large-select', 'large-remove', 'flat', 'complex-selector', 'work-budget',
                  'ordinary', 'flat-sibling', 'flat-sibling-chain', 'small-sibling', 'themed-page'):
         check('selector-' + case, ['php', '/source/tests/selector-budget.php'], timeout=5,
               environment={'RCS_SELECTOR_CASE': case})
     wp('regex-budget', ['--exec=ini_set("memory_limit", "64M");', 'eval-file', '/source/tests/regex-budget.php'])
     wp('plugin-check', ['plugin', 'check', 'remote-content-shortcode', '--format=table'], timeout=60)
+    wp('configure-multisite', ['core', 'multisite-convert', '--title=RCS network', '--base=/'])
+    wp('cache-multisite', ['eval-file', '/source/tests/cache-multisite.php'])
+    if COVERAGE:
+        check('opcode-map', ['sh', '-o', 'pipefail', '-c',
+              "php -d uopz.disable=0 -d opcache.enable_cli=0 -d vld.dump_paths=0 -d vld.save_paths=0 -d vld.execute=1 /usr/local/bin/wp --allow-root --path=/wordpress eval-file /source/tests/opcode-map.php 2>&1 | awk '/^Class |^End of class |^Function |^Dynamic|^PHP (Warning|Fatal|Parse)|^Error:|^\\[[^]]+\\] PHP (Warning|Fatal|Parse)/ {print;next} /^filename:/ {keep=($0 ~ /remote-content-shortcode/)} keep {print} /PASS captured compiler metadata/ {print}'"],
+              environment={'XDEBUG_MODE': 'coverage', 'RCS_DISPOSABLE_OPCODE_MAP': '1'})
     print(f'PASS Docker validation: WordPress {WORDPRESS}, PHP {PHP}', flush=True)
 finally:
     for service in reversed(SERVICES):

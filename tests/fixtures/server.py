@@ -34,13 +34,16 @@ class DNS(socketserver.BaseRequestHandler):
         address = None
         if kind == 1 and name != "ipv6-only.rcs.test":
             address = "127.0.0.1" if name == "private.rcs.test" or (name == "rebind.rcs.test" and rebind_private) else ADDRESS
-        elif kind == 28 and name == "ipv6-only.rcs.test":
+        elif kind == 28 and name in ("ipv6-only.rcs.test", "dual-stack.rcs.test"):
             address = "2606:4700:4700::1111"
+        elif kind == 28 and name == "mixed-stack.rcs.test":
+            address = "::1"
         answer = b""
         if address:
             packed = ipaddress.ip_address(address).packed
             answer = b"\xc0\x0c" + struct.pack("!HHIH", kind, 1, 0, len(packed)) + packed
-        header = packet[:2] + struct.pack("!HHHHH", 0x8180, 1, bool(answer), 0, 0)
+        flags = 0x8182 if kind == 28 and name == "aaaa-failure.rcs.test" else 0x8180
+        header = packet[:2] + struct.pack("!HHHHH", flags, 1, bool(answer), 0, 0)
         channel.sendto(header + question + answer, self.client_address)
 
 

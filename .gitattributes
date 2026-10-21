@@ -1,4 +1,5 @@
 * text=auto
+/tests/coverage-vld.patch -whitespace
 /.github export-ignore
 /.gitignore export-ignore
 /.gitattributes export-ignore

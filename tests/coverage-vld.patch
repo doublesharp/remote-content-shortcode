@@ -1,0 +1,27 @@
+--- a/vld.c
++++ b/vld.c
+@@ -127,13 +127,7 @@
+ 	old_compile_string = zend_compile_string;
+ 	old_execute_ex = zend_execute_ex;
+ 
+-	if (VLD_G(active)) {
+-		zend_compile_file = vld_compile_file;
+-		zend_compile_string = vld_compile_string;
+-		if (!VLD_G(execute)) {
+-			zend_execute_ex = vld_execute_ex;
+-		}
+-	}
++	zend_compile_file = vld_compile_file;
+ 
+ 	if (VLD_G(save_paths)) {
+ 		char *filename;
+@@ -354,6 +348,9 @@
+ 	}
+ 
+ 	op_array = old_compile_file (file_handle, type);
++	if (!VLD_G(active)) {
++		return op_array;
++	}
+ 
+ 	if (VLD_G(path_dump_file)) {
+ 		fprintf(VLD_G(path_dump_file), "subgraph cluster_file_%p { label=\"file %s\";\n", op_array, op_array->filename ? ZSTRING_VALUE(op_array->filename) : "__main");

@@ -11,6 +11,27 @@ permissions:
   contents: read
 
 jobs:
+  coverage:
+    name: PHP coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run bounded coverage checks
+        run: python3 tools/coverage.py
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: php-coverage
+          path: |
+            ${{ runner.temp }}/remote-content-shortcode/reports/coverage/*.info
+            ${{ runner.temp }}/remote-content-shortcode/reports/coverage/*.json
+            ${{ runner.temp }}/remote-content-shortcode/reports/coverage/*.txt
+          if-no-files-found: error
+          retention-days: 14
   docker:
     name: WordPress ${{ matrix.wordpress }} / PHP ${{ matrix.php }}
     runs-on: ubuntu-latest
