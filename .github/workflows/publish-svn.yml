@@ -102,6 +102,7 @@ jobs:
           SLUG: ${{ vars.PLUGIN_SLUG }}
           VERSION: ${{ steps.version.outputs.version }}
           BUILD_DIR: ${{ runner.temp }}/rcs-release/remote-content-shortcode
+          ASSETS_DIR: .wordpress-org
       - name: Verify the published SVN tag matches the package
         if: github.event_name == 'push' && steps.svn-version.outputs.exists != 'true'
         env:

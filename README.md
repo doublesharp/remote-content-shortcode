@@ -1,3 +1,5 @@
+![Remote Content Shortcode by doublesharp](.wordpress-org/banner-1544x500.png)
+
 # Remote Content Shortcode
 
 [![Checks](https://github.com/doublesharp/remote-content-shortcode/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/doublesharp/remote-content-shortcode/actions/workflows/validate.yml)

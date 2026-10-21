@@ -4,6 +4,8 @@
 /.gitignore export-ignore
 /.gitattributes export-ignore
 /README.md export-ignore
+/.wordpress-org export-ignore
+/branding export-ignore
 /tests export-ignore
 /tools export-ignore
 /.env* export-ignore
