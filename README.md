@@ -144,7 +144,21 @@ An alias grants shortcode authors access to its endpoint. Anyone who can view th
 
 The shortcode, block, selectors, public GET cache, stale fallback, URL rewriting, Basic/Bearer/API-key connections and all five tabs are part of Free. Free works independently and has no license client or licensing-service dependency.
 
-Remote Content Shortcode Pro is a separate add-on for reusable sources, scheduled refreshes, OAuth and source management. It uses Free's protected fetching and HTML transformations. Installed Pro features continue to run without an active update license. See [the extension APIs and hooks](docs/integrations.md) for PHP integrations.
+### Remote Content Shortcode Pro
+
+Pro is a separate add-on for sites managing recurring imports or multiple sources. It requires Free 2.0 or later and uses Free's protected fetching and HTML transformations.
+
+| Need | Included in Free | Added by Pro |
+| --- | --- | --- |
+| Embed and transform remote HTML | Shortcode, block, selectors, URL rewriting and public response cache | Reusable saved sources with a dedicated block and shortcode |
+| Authenticate requests | Encrypted, scoped Basic, Bearer and API-key connections | OAuth connections with authorization code/PKCE and client credentials |
+| Format JSON | PHP integration hooks | Escaped JSON templates with bounded loops |
+| Refresh recurring imports | Fetch public content when its cache expires | Scheduled refreshes for saved GET sources |
+| Manage and monitor sources | Diagnostics and a local usage scan | Refresh history, opt-in failure alerts, delegated source management and multisite tools |
+
+The Free settings page includes a small Pro overview below its own controls. It makes no background requests, is hidden when Pro is active, and stays off extension tabs. Site owners can [suppress it with a PHP filter](docs/integrations.md#administrator-tabs).
+
+Installed Pro features continue to run without an active update license. See [the extension APIs and hooks](docs/integrations.md) for PHP integrations.
 
 Uninstalling Free removes its cached data and administrator-managed connection records on each site. PHP-configured credential constants, external options, protected metadata and unrelated caches are retained. Deactivation preserves the settings.
 

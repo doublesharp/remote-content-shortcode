@@ -66,7 +66,14 @@ class Remote_Content_Shortcode_Admin {
 			case 'help': self::help(); break;
 			default: do_action( 'remote_content_shortcode_admin_tab_' . $tab );
 		}
+		self::pro_overview( $tab );
 		echo '</div>';
+	}
+	private static function pro_overview( $tab ) {
+		if ( defined( 'RCS_PRO_VERSION' ) || ! in_array( $tab, array( 'builder', 'connections', 'cache', 'usage', 'help' ), true ) || ! apply_filters( 'remote_content_shortcode_show_pro_overview', true ) ) { return; }
+		echo '<section id="rcs-pro-overview" class="card" aria-labelledby="rcs-pro-heading"><h2 id="rcs-pro-heading">' . esc_html__( 'Remote Content Shortcode Pro', 'remote-content-shortcode' ) . '</h2><p>' . esc_html__( 'For recurring imports and teams managing multiple sources.', 'remote-content-shortcode' ) . '</p><ul class="ul-disc">';
+		foreach ( array( __( 'Reusable saved sources and JSON templates', 'remote-content-shortcode' ), __( 'Scheduled refreshes, history and opt-in failure alerts', 'remote-content-shortcode' ), __( 'OAuth connections', 'remote-content-shortcode' ), __( 'Delegated source management and multisite tools', 'remote-content-shortcode' ) ) as $feature ) { echo '<li>' . esc_html( $feature ) . '</li>'; }
+		echo '</ul><p><a class="button button-secondary" href="' . esc_url( 'https://github.com/doublesharp/remote-content-shortcode#remote-content-shortcode-pro' ) . '">' . esc_html__( 'Learn about Pro', 'remote-content-shortcode' ) . '</a></p><p class="description">' . esc_html__( 'Your shortcode, block, cache and Basic/Bearer/API-key connections remain included in Free.', 'remote-content-shortcode' ) . '</p></section>';
 	}
 	private static function result( $result, $tab ) {
 		if ( is_wp_error( $result ) ) {

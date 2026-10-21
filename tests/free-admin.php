@@ -87,6 +87,32 @@ $tests['usage is paginated and support copy omits content and secrets'] = static
 		$html = $page( 'help' ); rcs_free_assert( str_contains( $html, 'Support summary' ) && ! str_contains( $html, 'unique-query-secret' ) && ! str_contains( $html, 'test-secret-unique' ), 'Support copy leaked secrets.' );
 	} finally { foreach ( $ids as $id ) { wp_delete_post( $id, true ); } }
 };
+$tests['Pro overview is restrained, accurate and makes no background requests'] = static function () use ( $page ) {
+	$requests = 0; $block = static function () use ( &$requests ) { ++$requests; return new WP_Error( 'unexpected_promotion_request' ); };
+	add_filter( 'pre_http_request', $block );
+	try {
+		foreach ( array( 'builder', 'connections', 'cache', 'usage', 'help' ) as $tab ) {
+			$html = $page( $tab );
+			rcs_free_assert( 1 === substr_count( $html, 'id="rcs-pro-overview"' ) && str_contains( $html, 'aria-labelledby="rcs-pro-heading"' ), 'Expected one accessible Pro overview on the plugin page.' );
+			rcs_free_assert( str_contains( $html, 'OAuth' ) && str_contains( $html, 'Scheduled refreshes' ) && str_contains( $html, 'JSON templates' ) && str_contains( $html, 'remain included in Free' ), 'Pro overview obscures the Free/Pro feature boundary.' );
+			rcs_free_assert( str_contains( $html, 'https://github.com/doublesharp/remote-content-shortcode#remote-content-shortcode-pro' ) && str_contains( $html, 'button button-secondary' ), 'Pro details do not have a quiet, working destination.' );
+			if ( in_array( $tab, array( 'builder', 'connections', 'cache' ), true ) ) { rcs_free_assert( strpos( $html, 'id="rcs-pro-overview"' ) > strrpos( $html, '</form>' ), 'Promotion interrupted the Free controls.' ); }
+		}
+		rcs_free_assert( 0 === $requests, 'Pro overview phoned home while rendering.' );
+	} finally { remove_filter( 'pre_http_request', $block ); }
+};
+$tests['Pro overview respects suppression and extension pages'] = static function () use ( $page ) {
+	$hide = '__return_false'; add_filter( 'remote_content_shortcode_show_pro_overview', $hide );
+	try { rcs_free_assert( ! str_contains( $page( 'builder' ), 'id="rcs-pro-overview"' ), 'Site owner could not suppress the Pro overview.' ); }
+	finally { remove_filter( 'remote_content_shortcode_show_pro_overview', $hide ); }
+	$tab = static function ( $tabs ) { $tabs['extension'] = 'Extension'; return $tabs; }; add_filter( 'remote_content_shortcode_admin_tabs', $tab );
+	try { rcs_free_assert( ! str_contains( $page( 'extension' ), 'id="rcs-pro-overview"' ), 'Pro overview appeared on an extension page.' ); }
+	finally { remove_filter( 'remote_content_shortcode_admin_tabs', $tab ); }
+};
+$tests['active Pro customers do not see an upgrade pitch'] = static function () use ( $page ) {
+	define( 'RCS_PRO_VERSION', '2.0' );
+	foreach ( array( 'builder', 'connections', 'help' ) as $tab ) { rcs_free_assert( ! str_contains( $page( $tab ), 'id="rcs-pro-overview"' ), 'Active Pro customer received an upgrade pitch.' ); }
+};
 $old = get_option( 'rcs_connections_v1', null ); $old_user = get_current_user_id(); $request = $_REQUEST; $failures = 0;
 try { foreach ( $tests as $name => $test ) { wp_set_current_user( 1 ); delete_option( 'rcs_connections_v1' ); try { $test(); echo "PASS $name\n"; } catch ( Throwable $error ) { ++$failures; echo "FAIL $name: " . $error->getMessage() . "\n"; } } }
 finally { null === $old ? delete_option( 'rcs_connections_v1' ) : update_option( 'rcs_connections_v1', $old, false ); wp_set_current_user( $old_user ); $_REQUEST = $request; }

@@ -67,6 +67,12 @@ add_action( 'remote_content_shortcode_admin_tab_my_sources', function () {
 
 The filter receives a `slug => label` map. Slugs start with a lowercase letter and contain only lowercase letters, digits, underscores or hyphens, up to 64 characters. Labels are escaped. The screen checks `manage_options` before rendering or dispatching any tab. Extension callbacks own their output escaping, POST handling, capabilities and nonces. A tab callback does not create a public endpoint.
 
+The Pro overview appears below the built-in Free controls and is hidden when Pro is active. It makes no background requests and does not appear on extension tabs. To suppress it for a managed site, add this in a site plugin:
+
+```php
+add_filter( 'remote_content_shortcode_show_pro_overview', '__return_false' );
+```
+
 ## Existing transformation hooks
 
 | Hook | Arguments | Use |
