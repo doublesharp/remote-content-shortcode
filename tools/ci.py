@@ -103,6 +103,8 @@ try:
     wp('download-wordpress', ['core', 'download', '--version=' + WORDPRESS], isolated=False, timeout=60)
     check('download-plugin-check', ['php', '-r',
           '$body = file_get_contents("https://downloads.wordpress.org/plugin/plugin-check.latest-stable.zip"); if (false === $body) { exit(1); } if (false === file_put_contents("/work/plugin-check.zip", $body)) { exit(1); }'], isolated=False, timeout=45)
+    check('download-legacy-plugin', ['php', '-r',
+          '$body = file_get_contents("https://downloads.wordpress.org/plugin/remote-content-shortcode.1.5.zip"); if (false === $body || "682db34c649168cbec5a800090dd1c6de8fdfe311bdd29145e4b2af591b3b436" !== hash("sha256", $body)) { exit(1); } if (false === file_put_contents("/work/legacy-plugin.zip", $body)) { exit(1); }'], isolated=False, timeout=45)
     check('certificates', ['php', '/source/tests/fixtures/certificates.php'], isolated=False)
     network = command(['docker', 'network', 'create', '--internal', '--subnet', '11.231.47.0/24', NETWORK], capture=True)
     NETWORK_CREATED = True
@@ -130,11 +132,15 @@ try:
                               '--dbpass=rcs-disposable-db', '--dbhost=11.231.47.20', '--skip-check', '--skip-salts'])
     wp('install-wordpress', ['core', 'install', '--url=http://wordpress.rcs.test', '--title=RCS Docker checks',
                             '--admin_user=rcs_admin', '--admin_password=rcs-disposable-admin', '--admin_email=test@example.com', '--skip-email'])
-    shutil.copytree(WORK / 'release/remote-content-shortcode', WP / 'wp-content/plugins/remote-content-shortcode')
-    wp('activate-plugin', ['plugin', 'activate', 'remote-content-shortcode'])
-    wp('install-plugin-check', ['plugin', 'install', '/work/plugin-check.zip', '--activate'])
     ca = WP / 'wp-includes/certificates/ca-bundle.crt'
     ca.write_bytes(ca.read_bytes() + b'\n' + (CERTIFICATES / 'ca.pem').read_bytes())
+    # Install the original release, save legacy content, and replace it through WordPress's upgrader.
+    wp('install-legacy-plugin', ['plugin', 'install', '/work/legacy-plugin.zip', '--activate'])
+    wp('upgrade-prepare', ['eval-file', '/source/tests/upgrade-from-1.5.php'], environment={'RCS_UPGRADE_PHASE': 'prepare'})
+    wp('upgrade-plugin', ['plugin', 'install', '/reports/' + archive.name, '--force'])
+    wp('upgrade-verify', ['eval-file', '/source/tests/upgrade-from-1.5.php'])
+    wp('cve-regression', ['eval-file', '/source/tests/cve-regression.php'])
+    wp('install-plugin-check', ['plugin', 'install', '/work/plugin-check.zip', '--activate'])
     for suite in ('regression', 'integration-transport', 'features-integration', 'content-auth-features',
                   'cache-features', 'admin-block-features', 'transport'):
         wp(suite, ['eval-file', f'/source/tests/{suite}.php'])

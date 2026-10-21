@@ -143,6 +143,7 @@ Security update. Requires WordPress 6.6 and PHP 8.2 with DOM and cURL. HTML is s
 == Changelog ==
 
 = 2.0 =
+* Fix CVE-2023-45652, local file inclusion; CVE-2024-2089, stored cross-site scripting; and CVE-2024-2090, server-side request forgery.
 * Sanitize all rendered remote HTML, including replacement and filter output.
 * Replace direct cURL fetches with WordPress safe HTTP requests and pin validated public addresses to prevent DNS rebinding.
 * Validate every redirect, verify TLS, and limit request time, response size, output expansion, and replacement count.

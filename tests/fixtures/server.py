@@ -60,6 +60,10 @@ class HTTP(BaseHTTPRequestHandler):
                 body = json.dumps(counts).encode()
         else:
             body = b"<p>fixture success</p>"
+        if path == "/xss.txt":
+            body = b"<image src=0 onerror=alert(8)><p>CVE fixture marker</p>"
+        if path == "/upgrade":
+            body = b'<main><p class="keep">Legacy article</p><aside>Advertisement</aside></main>'
         if path in ("/encoded", "/lf-encoded"):
             body = gzip.compress(b"x" * 2000000)
             if path == "/lf-encoded":
