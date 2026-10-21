@@ -91,9 +91,8 @@ class Remote_Content_Shortcode_HTML {
 					return new WP_Error( 'invalid_selector' );
 				}
 				foreach ( iterator_to_array( $nodes ) as $node ) {
-					if ( $node->parentNode ) {
-						$node->parentNode->removeChild( $node );
-					}
+					// CSS queries return elements. Descendants keep their parent even after an ancestor is removed.
+					$node->parentNode->removeChild( $node );
 				}
 			}
 			if ( '' !== $selector ) {

@@ -278,7 +278,8 @@ if ( ! class_exists( 'RemoteContentShortcode' ) ) {
 		}
 
 		private function public_address( $url ) {
-			if ( ! is_string( $url ) || strlen( $url ) > 8192 || ! wp_http_validate_url( $url ) ) {
+			// The caller supplies canonical_url()'s string; encoding can still expand its length.
+			if ( strlen( $url ) > 8192 || ! wp_http_validate_url( $url ) ) {
 				return false;
 			}
 			$parts = wp_parse_url( $url );
@@ -314,7 +315,8 @@ if ( ! class_exists( 'RemoteContentShortcode' ) ) {
 
 		private function request( $url, $args ) {
 			$deadline = microtime( true ) + $args['timeout'];
-			for ( $redirects = 0; $redirects <= 3; ++$redirects ) {
+			// The redirect guard below returns on the fourth attempt, so this loop cannot fall through.
+			for ( $redirects = 0; ; ++$redirects ) {
 				$url = $this->canonical_url( $url );
 				$address = $this->public_address( $url );
 				if ( ! $address ) {
@@ -352,7 +354,6 @@ if ( ! class_exists( 'RemoteContentShortcode' ) ) {
 				}
 				return array( 'body' => $body, 'url' => $url, 'status' => $status );
 			}
-			return new WP_Error( 'redirect_not_allowed' );
 		}
 
 		private function pinned_request( $url, $args, $address ) {
@@ -371,13 +372,13 @@ if ( ! class_exists( 'RemoteContentShortcode' ) ) {
 				if ( $handle !== $expected_handle ) {
 					return;
 				}
-				$ip = str_contains( $address, ':' ) ? '[' . $address . ']' : $address;
 				// Use the checked address while retaining the original Host header, SNI, and certificate name.
+				// WordPress rejects IPv6 literals; hostname resolution selects an IPv4 address.
 				// phpcs:ignore WordPress.WP.AlternativeFunctions.curl_curl_setopt_array -- Configure WordPress's own cURL transport for DNS pinning.
 				$configured = curl_setopt_array( $handle, array(
 					CURLOPT_URL => $url,
-					CURLOPT_RESOLVE => array( $host . ':' . $port . ':' . $ip ),
-					CURLOPT_CONNECT_TO => array( '::' . $ip . ':' . $port ),
+					CURLOPT_RESOLVE => array( $host . ':' . $port . ':' . $address ),
+					CURLOPT_CONNECT_TO => array( '::' . $address . ':' . $port ),
 					CURLOPT_PROXY => '',
 					CURLOPT_FOLLOWLOCATION => false,
 					CURLOPT_MAXFILESIZE_LARGE => self::MAX_BYTES - 1,

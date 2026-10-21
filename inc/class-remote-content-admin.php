@@ -56,7 +56,7 @@ class Remote_Content_Shortcode_Admin {
 				echo '<dt>' . esc_html( $label ) . '</dt><dd>' . esc_html( $value ) . '</dd>';
 			}
 			echo '</dl>';
-			if ( isset( $result['html'] ) && is_string( $result['html'] ) ) { echo '<h2>' . esc_html__( 'Preview', 'remote-content-shortcode' ) . '</h2><div>' . wp_kses_post( $result['html'] ) . '</div>'; }
+			if ( is_string( $result['html'] ) ) { echo '<h2>' . esc_html__( 'Preview', 'remote-content-shortcode' ) . '</h2><div>' . wp_kses_post( $result['html'] ) . '</div>'; }
 		}
 		echo '<form method="post">';
 		wp_nonce_field( 'rcs_tools' );
@@ -71,7 +71,7 @@ class Remote_Content_Shortcode_Admin {
 			echo ' value="' . esc_attr( $default[ $key ] ?? '' ) . '"></td></tr>';
 		}
 		foreach ( array( 'rewrite_urls' => __( 'Rewrite relative URLs', 'remote-content-shortcode' ) ) as $key => $label ) {
-			echo '<tr><th><label for="rcs-' . esc_attr( $key ) . '">' . esc_html( $label ) . '</label></th><td><select id="rcs-' . esc_attr( $key ) . '" name="' . esc_attr( $key ) . '"><option value="true">' . esc_html__( 'Yes', 'remote-content-shortcode' ) . '</option><option value="false"' . ( 'rewrite_urls' === $key ? ' selected' : '' ) . '>' . esc_html__( 'No', 'remote-content-shortcode' ) . '</option></select></td></tr>';
+			echo '<tr><th><label for="rcs-' . esc_attr( $key ) . '">' . esc_html( $label ) . '</label></th><td><select id="rcs-' . esc_attr( $key ) . '" name="' . esc_attr( $key ) . '"><option value="true">' . esc_html__( 'Yes', 'remote-content-shortcode' ) . '</option><option value="false" selected>' . esc_html__( 'No', 'remote-content-shortcode' ) . '</option></select></td></tr>';
 		}
 		echo '</table><p>' . esc_html__( 'Test requests fetch fresh content and bypass visitor caching. Cache settings belong in the shortcode or block.', 'remote-content-shortcode' ) . '</p><p>' . esc_html__( 'Credentials must be configured outside the editor. Enter an alias only.', 'remote-content-shortcode' ) . '</p><p><button class="button button-primary" name="rcs_action" value="test">' . esc_html__( 'Test content', 'remote-content-shortcode' ) . '</button> <button class="button" name="rcs_action" value="clear">' . esc_html__( 'Clear cache', 'remote-content-shortcode' ) . '</button></p></form></div>';
 	}
