@@ -63,7 +63,13 @@ class Remote_Content_Shortcode_Cache {
 	}
 	private static function prune( &$index ) {
 		foreach ( $index as $id => $meta ) {
-			if ( $meta['expires'] <= time() ) {
+			// Invalid identifiers must never cause deletion of another plugin's payload.
+			if ( ! is_string( $id ) || ! preg_match( '/^rcs_v2_[a-f0-9]{64}$/D', $id ) ) {
+				unset( $index[ $id ] );
+				continue;
+			}
+			// Remove owned payloads when their metadata cannot safely account for them.
+			if ( ! is_array( $meta ) || ! isset( $meta['expires'], $meta['bytes'], $meta['tag'] ) || ! is_int( $meta['expires'] ) || ! is_int( $meta['bytes'] ) || $meta['bytes'] < 0 || ! is_string( $meta['tag'] ) || $meta['expires'] <= time() ) {
 				self::remove( $id );
 				unset( $index[ $id ] );
 			}
@@ -72,7 +78,7 @@ class Remote_Content_Shortcode_Cache {
 
 	public static function get( $key, $allow_stale = false ) {
 		$entry = self::read( self::id( $key ) );
-		if ( ! is_array( $entry ) || ! isset( $entry['fresh_until'], $entry['stale_until'] ) ) { return false; }
+		if ( ! is_array( $entry ) || ! isset( $entry['fresh_until'], $entry['stale_until'], $entry['value'] ) ) { return false; }
 		if ( $allow_stale ) {
 			if ( $entry['stale_until'] <= time() ) { return false; }
 			$good = isset( $entry['good'] ) ? $entry['good'] : $entry['value'];
@@ -100,7 +106,7 @@ class Remote_Content_Shortcode_Cache {
 			if ( is_wp_error( $value ) ) {
 				$old = self::read( $id );
 				$entry['stale_until'] = 0;
-				if ( is_array( $old ) && $old['stale_until'] > $now ) {
+				if ( is_array( $old ) && isset( $old['stale_until'], $old['value'] ) && $old['stale_until'] > $now ) {
 					$good = isset( $old['good'] ) ? $old['good'] : $old['value'];
 					if ( ! is_wp_error( $good ) ) {
 						$entry['good'] = $good;
