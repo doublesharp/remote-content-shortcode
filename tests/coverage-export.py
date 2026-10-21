@@ -213,13 +213,13 @@ class CoverageExportTests(unittest.TestCase):
         data['coverage']['/source/fixture.php']['lines']['3'] = -1
         data['coverage']['/source/fixture.php']['lines']['4'] = 1
         (raw_dir / (sorted(coverage.CASES)[0] + '.json')).write_text(json.dumps(data))
-        merged, cases, _ = coverage.merge(self.root, self.report, ['fixture.php'], 43)
-        self.assertEqual(len(cases), 43)
+        merged, cases, _ = coverage.merge(self.root, self.report, ['fixture.php'], len(coverage.CASES))
+        self.assertEqual(len(cases), len(coverage.CASES))
         self.assertEqual(merged['fixture.php']['lines'], {3: 1, 4: 1})
         self.assertEqual(merged['fixture.php']['functions'], {})
         self.source.write_text(self.source.read_text() + '// changed after capture\n')
         with self.assertRaisesRegex(AssertionError, 'source mismatch'):
-            coverage.merge(self.root, self.report, ['fixture.php'], 43)
+            coverage.merge(self.root, self.report, ['fixture.php'], len(coverage.CASES))
 
     def test_merge_rejects_mixed_runtimes_and_missing_test_processes(self):
         raw_dir, data = self.raw_collection()
@@ -227,10 +227,10 @@ class CoverageExportTests(unittest.TestCase):
         data['runtime']['php'] = '8.4'
         target.write_text(json.dumps(data))
         with self.assertRaisesRegex(AssertionError, 'Mixed coverage runtimes'):
-            coverage.merge(self.root, self.report, ['fixture.php'], 43)
+            coverage.merge(self.root, self.report, ['fixture.php'], len(coverage.CASES))
         target.unlink()
         with self.assertRaisesRegex(AssertionError, 'test collection mismatch'):
-            coverage.merge(self.root, self.report, ['fixture.php'], 43)
+            coverage.merge(self.root, self.report, ['fixture.php'], len(coverage.CASES))
 
     def test_literal_infinite_loop_excludes_only_tokenized_implicit_epilogue(self):
         info, maps = self.loop()

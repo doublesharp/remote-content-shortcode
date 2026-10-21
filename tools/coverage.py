@@ -86,7 +86,7 @@ try:
                        RCS_WORDPRESS_VERSION='7.1.3')
     logged([sys.executable, str(ROOT / 'tools/ci.py')], 'validation', 300, environment)
     logged([sys.executable, str(ROOT / 'tools/coverage-export.py'), '--root', str(ROOT),
-            '--report', str(REPORT), '--manifest', str(WORK / 'files.json'), '--expected-cases', '43'],
+            '--report', str(REPORT), '--manifest', str(WORK / 'files.json'), '--expected-cases', '47'],
            'export', 30)
     print((REPORT / 'summary.txt').read_text(), end='')
     print('Coverage reports: ' + str(REPORT))

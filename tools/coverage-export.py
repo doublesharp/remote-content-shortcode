@@ -22,6 +22,7 @@ CASES = {
     'anonymous-rest-cache', 'render-contexts', 'proxy-transport', 'cache-write',
     'cache-read', 'cache-uninstall', 'uninstall-boundaries', 'regex-budget',
     'cache-multisite', 'dependency-failures', 'transport-dependency-failures',
+    'extension-api', 'free-admin', 'free-platform-boundaries', 'free-platform-failures',
 } | {'selector-' + case for case in SELECTORS} | {'startup-' + case for case in STARTUPS}
 
 

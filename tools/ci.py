@@ -29,6 +29,9 @@ COVERAGE = Path(os.environ['RCS_COVERAGE_DIR']).resolve() if os.environ.get('RCS
 if COVERAGE and (not any(root in COVERAGE.parents for root in allowed_roots)
                  or not all((COVERAGE / name).is_file() for name in ('prepend.php', 'files.json'))):
     sys.exit('Coverage inputs must be prepared under Scratch or GitHub RUNNER_TEMP.')
+PRO = Path(os.environ['RCS_PRO_SOURCE_DIR']).resolve() if os.environ.get('RCS_PRO_SOURCE_DIR') else None
+if PRO and (not (PRO / 'remote-content-shortcode-pro.php').is_file() or COVERAGE):
+    sys.exit('Pro integration requires its separate source repo and runs independently of Free coverage.')
 FAULT_TESTS = os.environ.get('RCS_FAULT_TESTS') == '1'
 WORK = BASE / 'tmp' / ('ci-' + secrets.token_hex(4))
 REPORTS.mkdir(parents=True, exist_ok=True)
@@ -66,17 +69,19 @@ def check(name, arguments, timeout=30, environment=None, isolated=True):
               '-v', f'{WORK}:/work', '-v', f'{REPORTS}:/reports',
               '-w', '/wordpress', '-e', 'HOME=/work', '-e', 'WP_CLI_CACHE_DIR=/work/wp-cli-cache',
               '-e', 'RCS_PLUGIN_FILE=/wordpress/wp-content/plugins/remote-content-shortcode/remote-content-shortcode.php']
+    if PRO:
+        docker += ['-v', f'{PRO}:/pro-source:ro']
     if isolated:
         docker += ['--network', NETWORK, '--dns', '11.231.47.10']
-    covered = (name.endswith('dependency-failures') or name.endswith('-boundaries')
+    covered = (name.endswith('dependency-failures') or name == 'free-platform-failures' or name.endswith('-boundaries')
                or name.startswith(('selector-', 'startup-')) or name in {
                    'upgrade-verify', 'cve-regression', 'encoded-fallback', 'regression',
                    'integration-transport', 'features-integration', 'content-auth-features',
                    'cache-features', 'admin-block-features', 'transport', 'anonymous-rest-cache',
                    'render-contexts', 'proxy-transport', 'cache-write', 'cache-read',
-                   'cache-uninstall', 'regex-budget', 'cache-multisite'})
+                   'cache-uninstall', 'regex-budget', 'cache-multisite', 'extension-api', 'free-admin'})
     if arguments[0] == 'php':
-        fault = name.endswith('dependency-failures') or name.startswith('startup-')
+        fault = name.endswith('dependency-failures') or name == 'free-platform-failures' or name.startswith('startup-')
         # uopz changes compiler indices, so coverage and opcode capture use one mode.
         enabled = fault or (COVERAGE and covered)
         arguments = [arguments[0], '-d', 'uopz.disable=' + ('0' if enabled else '1'), *arguments[1:]]
@@ -184,10 +189,11 @@ try:
     wp('install-plugin-check', ['plugin', 'install', '/work/plugin-check.zip', '--activate'])
     for suite in ('regression', 'integration-transport', 'features-integration', 'content-auth-features',
                   'cache-features', 'admin-block-features', 'transport', 'content-boundaries',
-                  'admin-cache-boundaries', 'renderer-boundaries', 'transport-boundaries'):
+                  'admin-cache-boundaries', 'renderer-boundaries', 'transport-boundaries',
+                  'extension-api', 'free-admin', 'free-platform-boundaries'):
         wp(suite, ['eval-file', f'/source/tests/{suite}.php'])
     if FAULT_TESTS:
-        for suite in ('dependency-failures', 'transport-dependency-failures'):
+        for suite in ('dependency-failures', 'transport-dependency-failures', 'free-platform-failures'):
             wp(suite, ['eval-file', f'/source/tests/{suite}.php'])
     wp('anonymous-rest-cache', ['--exec=define("REST_REQUEST", true);', 'eval-file', '/source/tests/anonymous-rest-cache.php'])
     wp('render-contexts', ['--exec=define("WP_ADMIN", true);', 'eval-file', '/source/tests/render-contexts.php'])
@@ -206,8 +212,27 @@ try:
               environment={'RCS_SELECTOR_CASE': case})
     wp('regex-budget', ['--exec=ini_set("memory_limit", "64M");', 'eval-file', '/source/tests/regex-budget.php'])
     wp('plugin-check', ['plugin', 'check', 'remote-content-shortcode', '--format=table'], timeout=60)
+    if PRO:
+        pro_plugin = WP / 'wp-content/plugins/remote-content-shortcode-pro'
+        pro_plugin.mkdir()
+        for name in ('remote-content-shortcode-pro.php', 'uninstall.php', 'readme.txt', 'LICENSE.txt', 'inc', 'assets', 'vendor'):
+            source = PRO / name
+            if source.is_dir():
+                shutil.copytree(source, pro_plugin / name, ignore=shutil.ignore_patterns('.git', '.env', '.env.*', '__pycache__'))
+            elif source.is_file():
+                shutil.copy2(source, pro_plugin / name)
+        check('pro-lint', ['sh', '-ec', 'find /wordpress/wp-content/plugins/remote-content-shortcode-pro -name "*.php" -print0 | xargs -0 -n 1 php -l'])
+        wp('pro-activate', ['plugin', 'activate', 'remote-content-shortcode-pro'])
+        for suite in ('updater', 'sources', 'templates', 'scheduler', 'oauth', 'oauth-boundaries', 'oauth-storage', 'activity', 'activity-boundaries', 'network', 'network-boundaries', 'source-boundaries', 'uninstall'):
+            wp('pro-' + suite, ['eval-file', f'/pro-source/tests/{suite}.php'])
+        for mode, flag in (('local', '1'), ('development', '1'), ('production', '1'), ('local', '0')):
+            wp('pro-dev-' + mode + '-' + flag, ['eval-file', '/pro-source/tests/development-updater.php'],
+               environment={'WP_ENVIRONMENT_TYPE': mode, 'RCS_TEST_LOCAL_LICENSE': flag})
     wp('configure-multisite', ['core', 'multisite-convert', '--title=RCS network', '--base=/'])
     wp('cache-multisite', ['eval-file', '/source/tests/cache-multisite.php'])
+    if PRO:
+        for suite in ('updater', 'sources', 'network', 'network-boundaries', 'oauth-boundaries', 'oauth-storage', 'source-boundaries', 'uninstall'):
+            wp('pro-multisite-' + suite, ['eval-file', f'/pro-source/tests/{suite}.php'])
     if COVERAGE:
         check('opcode-map', ['sh', '-o', 'pipefail', '-c',
               "php -d uopz.disable=0 -d opcache.enable_cli=0 -d vld.dump_paths=0 -d vld.save_paths=0 -d vld.execute=1 /usr/local/bin/wp --allow-root --path=/wordpress eval-file /source/tests/opcode-map.php 2>&1 | awk '/^Class |^End of class |^Function |^Dynamic|^PHP (Warning|Fatal|Parse)|^Error:|^\\[[^]]+\\] PHP (Warning|Fatal|Parse)/ {print;next} /^filename:/ {keep=($0 ~ /remote-content-shortcode/)} keep {print} /PASS captured compiler metadata/ {print}'"],
