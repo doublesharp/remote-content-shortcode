@@ -3,6 +3,22 @@
 if ( ! extension_loaded( 'xdebug' ) || ! in_array( 'coverage', xdebug_info( 'mode' ), true ) ) { throw new RuntimeException( 'Xdebug coverage mode is required.' ); }
 $rcs_coverage_files = json_decode( file_get_contents( '/coverage/files.json' ), true, 512, JSON_THROW_ON_ERROR );
 $rcs_coverage_roots = array( '/wordpress/wp-content/plugins/remote-content-shortcode/', '/source/' );
+if ( file_exists( '/coverage/profile.json' ) ) {
+	$rcs_coverage_profile = json_decode( file_get_contents( '/coverage/profile.json' ), false, 512, JSON_THROW_ON_ERROR );
+	if ( ! $rcs_coverage_profile instanceof stdClass || ! isset( $rcs_coverage_profile->prefixes ) || ! is_array( $rcs_coverage_profile->prefixes ) || ! $rcs_coverage_profile->prefixes ) {
+		throw new RuntimeException( 'Coverage profile prefixes must be a nonempty list.' );
+	}
+	foreach ( $rcs_coverage_profile->prefixes as $root ) {
+		if ( ! is_string( $root ) || ! str_starts_with( $root, '/' ) || ! str_ends_with( $root, '/' ) || str_contains( $root, '\\' ) || preg_match( '/[\x00-\x1f\x7f]/', $root ) ) {
+			throw new RuntimeException( 'Coverage profile prefixes must be absolute normalized trailing-slash roots.' );
+		}
+		foreach ( explode( '/', substr( $root, 1, -1 ) ) as $part ) {
+			if ( in_array( $part, array( '', '.', '..' ), true ) ) { throw new RuntimeException( 'Coverage profile roots cannot contain empty or relative components.' ); }
+		}
+	}
+	if ( count( array_unique( $rcs_coverage_profile->prefixes ) ) !== count( $rcs_coverage_profile->prefixes ) ) { throw new RuntimeException( 'Coverage profile prefixes must be unique.' ); }
+	$rcs_coverage_roots = $rcs_coverage_profile->prefixes;
+}
 $rcs_coverage_paths = array();
 foreach ( $rcs_coverage_roots as $root ) {
 	foreach ( $rcs_coverage_files as $file ) { $rcs_coverage_paths[] = $root . $file; }

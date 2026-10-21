@@ -7,6 +7,8 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -37,6 +39,9 @@ def instruction(opcode, operands='', line=3):
 
 class CoverageExportTests(unittest.TestCase):
     def setUp(self):
+        if hasattr(coverage, 'configure_profile'):
+            coverage.configure_profile()
+            self.addCleanup(coverage.configure_profile)
         self.temporary = tempfile.TemporaryDirectory(prefix='coverage-export-tests-', dir=SCRATCH)
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
@@ -44,6 +49,110 @@ class CoverageExportTests(unittest.TestCase):
         self.report.mkdir()
         self.source = self.root / 'fixture.php'
         self.source.write_text('<?php\nfunction fixture() {\n    while (true) {}\n}\n')
+
+    def profile(self):
+        return {'prefixes': ['/pro-source/', '/wordpress/wp-content/plugins/private-plugin/'],
+                'cases': ['pro-first', 'pro-second'],
+                'minimums': {'lines': 100, 'functions': 100, 'branches': 95}}
+
+    def configure(self, profile):
+        self.assertTrue(callable(getattr(coverage, 'configure_profile', None)),
+                        'The exporter must support explicit coverage profiles')
+        coverage.configure_profile(profile)
+
+    def test_profile_defaults_preserve_free_roots_cases_and_minimums(self):
+        original_cases = set(coverage.CASES)
+        self.assertEqual(len(original_cases), 47)
+        self.configure(self.profile())
+        coverage.configure_profile()
+        self.assertEqual(coverage.PREFIXES,
+                         ('/wordpress/wp-content/plugins/remote-content-shortcode/', '/source/'))
+        self.assertEqual(coverage.CASES, original_cases)
+        self.assertEqual(coverage.MINIMUMS, {'lines': 100, 'functions': 100, 'branches': 95})
+
+    def test_profile_rejects_invalid_shape_roots_cases_and_weakened_gates_atomically(self):
+        valid = self.profile()
+        bad_profiles = [None, [], {}, dict(valid, extra=True)]
+        for key in valid:
+            missing = copy.deepcopy(valid)
+            del missing[key]
+            bad_profiles.append(missing)
+        for prefixes in ([], '/source/', ['/source'], ['source/'], ['/'], ['/source//'],
+                         ['/source/../'], ['/./'], ['/source/\\bad/'], ['/source/\x00/'],
+                         ['/source/', '/source/'], [4]):
+            bad_profiles.append(dict(valid, prefixes=prefixes))
+        for cases in ([], 'pro-first', ['same', 'same'], ['../escape'], ['UPPER'], ['bad_name'],
+                      ['bad\n'], [''], [False]):
+            bad_profiles.append(dict(valid, cases=cases))
+        for minimums in ({}, {'lines': 100, 'functions': 100, 'branches': 94},
+                         {'lines': 99, 'functions': 100, 'branches': 95},
+                         {'lines': 100, 'functions': 99, 'branches': 95},
+                         {'lines': 100, 'functions': 100, 'branches': 101},
+                         {'lines': 100, 'functions': 100, 'branches': True},
+                         {'lines': 100, 'functions': 100, 'branches': '95'},
+                         dict(valid['minimums'], extra=100)):
+            bad_profiles.append(dict(valid, minimums=minimums))
+        self.configure(valid)
+        for bad in bad_profiles:
+            # None is the documented reset operation, rather than a JSON profile.
+            if bad is None:
+                continue
+            with self.subTest(profile=bad):
+                with self.assertRaises(ValueError):
+                    coverage.configure_profile(bad)
+                self.assertEqual(coverage.PREFIXES, tuple(valid['prefixes']))
+                self.assertEqual(coverage.CASES, set(valid['cases']))
+                self.assertEqual(coverage.MINIMUMS, valid['minimums'])
+        self.configure(dict(valid, minimums=dict(valid['minimums'], branches=100)))
+        self.assertEqual(coverage.MINIMUMS['branches'], 100)
+
+    def test_profile_custom_roots_apply_to_raw_records_names_and_opcode_metadata(self):
+        self.configure(self.profile())
+        raw_dir, data = self.raw_collection()
+        entry = data['coverage'].pop('/source/fixture.php')
+        entry['functions']['{closure:/pro-source/fixture.php:3-4}'] = {'branches': {}}
+        data['coverage']['/pro-source/fixture.php'] = entry
+        data['coverage']['/pro-source/vendor/excluded.php'] = {'lines': {'1': 1}}
+        data['hashes'].append('vendor-is-outside-manifest')
+        for target in raw_dir.glob('*.json'):
+            target.write_text(json.dumps(data))
+        merged, cases, _ = coverage.merge(self.root, self.report, ['fixture.php'], 2)
+        self.assertEqual(set(merged), {'fixture.php'})
+        self.assertEqual(set(cases), {'pro-first', 'pro-second'})
+        self.assertIn('{closure:fixture.php:3-4}', merged['fixture.php']['functions'])
+        self.assertIsNone(coverage.relative('/source/fixture.php', ['fixture.php']))
+        dump = self.root / 'opcodes.txt'
+        dump.write_text('filename:       /pro-source/fixture.php\nfunction name:  fixture\n'
+                        '    3     0  E >   RETURN                           null\n'
+                        'PASS captured compiler metadata\n')
+        self.assertEqual(coverage.parse_opcodes(dump, ['fixture.php'])[0]['file'], 'fixture.php')
+
+    def test_profile_requires_declared_case_names_even_when_counts_match(self):
+        profile = self.profile()
+        profile['prefixes'] = ['/source/']
+        self.configure(profile)
+        raw_dir, _ = self.raw_collection()
+        coverage.merge(self.root, self.report, ['fixture.php'], 2)
+        (raw_dir / 'pro-first.json').rename(raw_dir / 'unlisted-case.json')
+        with self.assertRaisesRegex(AssertionError, 'test collection mismatch'):
+            coverage.merge(self.root, self.report, ['fixture.php'], 2)
+        (raw_dir / 'unlisted-case.json').unlink()
+        with self.assertRaisesRegex(AssertionError, 'test collection mismatch'):
+            coverage.merge(self.root, self.report, ['fixture.php'], 1)
+
+    def test_cli_rejects_invalid_profiles_before_reading_collected_records(self):
+        profile = self.root / 'profile.json'
+        for value in ('null', '{"prefixes": []}',
+                      json.dumps(self.profile())[:-1] + ', "cases": ["duplicate-key"]}'):
+            with self.subTest(value=value):
+                profile.write_text(value)
+                result = subprocess.run([sys.executable, str(SPEC.origin), '--root', str(self.root),
+                                         '--report', str(self.report), '--manifest', str(self.root / 'absent.json'),
+                                         '--expected-cases', '2', '--profile', str(profile)],
+                                        capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('Invalid coverage profile', result.stderr)
+                self.assertNotIn('absent.json', result.stderr.split('error:')[-1])
 
     def section(self, ops, name='fixture', owner=None):
         return {'file': 'fixture.php', 'name': name, 'owner': owner, 'ops': ops}

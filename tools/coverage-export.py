@@ -24,6 +24,48 @@ CASES = {
     'cache-multisite', 'dependency-failures', 'transport-dependency-failures',
     'extension-api', 'free-admin', 'free-platform-boundaries', 'free-platform-failures',
 } | {'selector-' + case for case in SELECTORS} | {'startup-' + case for case in STARTUPS}
+MINIMUMS = {'lines': 100, 'functions': 100, 'branches': 95}
+FREE_PREFIXES, FREE_CASES, FREE_MINIMUMS = PREFIXES, frozenset(CASES), dict(MINIMUMS)
+
+
+def configure_profile(profile=None):
+    """Select an explicit measurement scope, or restore the immutable Free defaults."""
+    global PREFIXES, CASES, MINIMUMS
+    if profile is None:
+        PREFIXES, CASES, MINIMUMS = FREE_PREFIXES, set(FREE_CASES), dict(FREE_MINIMUMS)
+        return
+    if not isinstance(profile, dict) or set(profile) != {'prefixes', 'cases', 'minimums'}:
+        raise ValueError('Profile requires exactly prefixes, cases and minimums')
+    prefixes, cases, minimums = (profile[key] for key in ('prefixes', 'cases', 'minimums'))
+    if not isinstance(prefixes, list) or not prefixes:
+        raise ValueError('Profile prefixes must be a nonempty list')
+    for prefix in prefixes:
+        if (not isinstance(prefix, str) or not prefix.startswith('/') or not prefix.endswith('/')
+                or any(part in ('', '.', '..') for part in prefix[1:-1].split('/'))
+                or '\\' in prefix or any(ord(char) < 32 or ord(char) == 127 for char in prefix)):
+            raise ValueError('Profile prefixes must be absolute normalized trailing-slash roots')
+    if len(set(prefixes)) != len(prefixes):
+        raise ValueError('Profile prefixes must be unique')
+    if (not isinstance(cases, list) or not cases
+            or any(not isinstance(case, str) or not re.fullmatch(r'[a-z0-9-]+', case) for case in cases)):
+        raise ValueError('Profile cases must be a nonempty list of safe case IDs')
+    if len(set(cases)) != len(cases):
+        raise ValueError('Profile cases must be unique')
+    if (not isinstance(minimums, dict) or set(minimums) != set(FREE_MINIMUMS)
+            or any(type(minimums[key]) is not int or not floor <= minimums[key] <= 100
+                   for key, floor in FREE_MINIMUMS.items())):
+        raise ValueError('Profile minimums must retain at least 100% lines, 100% functions and 95% branches')
+    PREFIXES, CASES, MINIMUMS = tuple(prefixes), set(cases), dict(minimums)
+
+
+def profile_object(pairs):
+    """Reject duplicate JSON keys rather than silently overriding a scope or gate."""
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError('Duplicate profile key: ' + key)
+        result[key] = value
+    return result
 
 
 def items(value):
@@ -304,7 +346,18 @@ def main():
     parser.add_argument('--report', required=True, type=Path)
     parser.add_argument('--manifest', required=True, type=Path)
     parser.add_argument('--expected-cases', required=True, type=int)
+    parser.add_argument('--profile', type=Path, help='Explicit roots, exact case IDs and coverage minimums')
     args = parser.parse_args()
+    if args.profile is not None:
+        try:
+            profile = json.loads(args.profile.read_text(), object_pairs_hook=profile_object)
+            if profile is None:
+                raise ValueError('Profile must be an object')
+            configure_profile(profile)
+        except (OSError, ValueError) as error:
+            parser.error('Invalid coverage profile: ' + str(error))
+    else:
+        configure_profile()
     files = json.loads(args.manifest.read_text())
     merged, cases, runtime = merge(args.root, args.report, files, args.expected_cases)
     provenance = json.loads((args.report / 'opcode-source.json').read_text())
@@ -332,7 +385,8 @@ def main():
     print('\n'.join(messages))
     assert totals['lines_hit'] == totals['lines_total'], 'Line coverage must be 100%'
     assert totals['functions_hit'] == totals['functions_total'], 'Function coverage must be 100%'
-    assert 100 * totals['branches_hit'] >= 95 * totals['branches_total'], 'Conditional branch coverage must be at least 95%'
+    assert 100 * totals['branches_hit'] >= MINIMUMS['branches'] * totals['branches_total'], \
+        f"Conditional branch coverage must be at least {MINIMUMS['branches']}%"
 
 
 if __name__ == '__main__':

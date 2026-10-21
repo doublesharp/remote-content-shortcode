@@ -30,7 +30,8 @@ if COVERAGE and (not any(root in COVERAGE.parents for root in allowed_roots)
                  or not all((COVERAGE / name).is_file() for name in ('prepend.php', 'files.json'))):
     sys.exit('Coverage inputs must be prepared under Scratch or GitHub RUNNER_TEMP.')
 PRO = Path(os.environ['RCS_PRO_SOURCE_DIR']).resolve() if os.environ.get('RCS_PRO_SOURCE_DIR') else None
-if PRO and (not (PRO / 'remote-content-shortcode-pro.php').is_file() or COVERAGE):
+PRO_COVERAGE = bool(PRO and COVERAGE and os.environ.get('RCS_COVERAGE_PROFILE'))
+if PRO and (not (PRO / 'remote-content-shortcode-pro.php').is_file() or (COVERAGE and not PRO_COVERAGE)):
     sys.exit('Pro integration requires its separate source repo and runs independently of Free coverage.')
 FAULT_TESTS = os.environ.get('RCS_FAULT_TESTS') == '1'
 WORK = BASE / 'tmp' / ('ci-' + secrets.token_hex(4))
@@ -80,6 +81,7 @@ def check(name, arguments, timeout=30, environment=None, isolated=True):
                    'cache-features', 'admin-block-features', 'transport', 'anonymous-rest-cache',
                    'render-contexts', 'proxy-transport', 'cache-write', 'cache-read',
                    'cache-uninstall', 'regex-budget', 'cache-multisite', 'extension-api', 'free-admin'})
+    covered = (name.startswith('pro-') and name != 'pro-lint') if PRO_COVERAGE else covered
     if arguments[0] == 'php':
         fault = name.endswith('dependency-failures') or name == 'free-platform-failures' or name.startswith('startup-')
         # uopz changes compiler indices, so coverage and opcode capture use one mode.
@@ -161,7 +163,7 @@ try:
     database = PREFIX + '-db'
     SERVICES.append(database)
     command(['docker', 'run', '-d', '--name', database, '--network', NETWORK, '--ip', '11.231.47.20',
-             '--tmpfs', '/var/lib/mysql:rw,size=256m', '-e', 'MARIADB_ROOT_PASSWORD=rcs-disposable-root',
+             '--tmpfs', '/var/lib/mysql:rw,size=' + ('512m' if PRO_COVERAGE else '256m'), '-e', 'MARIADB_ROOT_PASSWORD=rcs-disposable-root',
              '-e', 'MARIADB_DATABASE=wordpress', '-e', 'MARIADB_USER=wordpress',
              '-e', 'MARIADB_PASSWORD=rcs-disposable-db', 'mariadb:10.6.19'])
     deadline = time.monotonic() + 45
@@ -225,6 +227,10 @@ try:
         wp('pro-activate', ['plugin', 'activate', 'remote-content-shortcode-pro'])
         for suite in ('updater', 'sources', 'templates', 'scheduler', 'oauth', 'oauth-boundaries', 'oauth-storage', 'activity', 'activity-boundaries', 'network', 'network-boundaries', 'source-boundaries', 'uninstall'):
             wp('pro-' + suite, ['eval-file', f'/pro-source/tests/{suite}.php'])
+        if PRO_COVERAGE:
+            for suite in ('coverage-admin', 'coverage-services'):
+                wp('pro-' + suite, ['eval-file', f'/pro-source/tests/{suite}.php'])
+            wp('pro-startup-missing-free', ['--skip-plugins=remote-content-shortcode', 'eval-file', '/pro-source/tests/coverage-startup.php'])
         for mode, flag in (('local', '1'), ('development', '1'), ('production', '1'), ('local', '0')):
             wp('pro-dev-' + mode + '-' + flag, ['eval-file', '/pro-source/tests/development-updater.php'],
                environment={'WP_ENVIRONMENT_TYPE': mode, 'RCS_TEST_LOCAL_LICENSE': flag})
@@ -233,9 +239,17 @@ try:
     if PRO:
         for suite in ('updater', 'sources', 'network', 'network-boundaries', 'oauth-boundaries', 'oauth-storage', 'source-boundaries', 'uninstall'):
             wp('pro-multisite-' + suite, ['eval-file', f'/pro-source/tests/{suite}.php'])
+        if PRO_COVERAGE:
+            for suite in ('coverage-admin', 'coverage-services'):
+                wp('pro-multisite-' + suite, ['eval-file', f'/pro-source/tests/{suite}.php'])
+    if PRO_COVERAGE:
+        mu = WP / 'wp-content/mu-plugins/rcs-pro-opcode.php'
+        mu.parent.mkdir(exist_ok=True)
+        shutil.copy2(PRO / 'tests/opcode-preload.php', mu)
     if COVERAGE:
+        opcode_script = '/pro-source/tests/opcode-map.php' if PRO_COVERAGE else '/source/tests/opcode-map.php'
         check('opcode-map', ['sh', '-o', 'pipefail', '-c',
-              "php -d uopz.disable=0 -d opcache.enable_cli=0 -d vld.dump_paths=0 -d vld.save_paths=0 -d vld.execute=1 /usr/local/bin/wp --allow-root --path=/wordpress eval-file /source/tests/opcode-map.php 2>&1 | awk '/^Class |^End of class |^Function |^Dynamic|^PHP (Warning|Fatal|Parse)|^Error:|^\\[[^]]+\\] PHP (Warning|Fatal|Parse)/ {print;next} /^filename:/ {keep=($0 ~ /remote-content-shortcode/)} keep {print} /PASS captured compiler metadata/ {print}'"],
+              f"php -d uopz.disable=0 -d opcache.enable_cli=0 -d vld.dump_paths=0 -d vld.save_paths=0 -d vld.execute=1 /usr/local/bin/wp --allow-root --path=/wordpress eval-file {opcode_script} 2>&1 | awk '/^Class |^End of class |^Function |^Dynamic|^PHP (Warning|Fatal|Parse)|^Error:|^\\[[^]]+\\] PHP (Warning|Fatal|Parse)/ {{print;next}} /^filename:/ {{keep=($0 ~ /remote-content-shortcode/)}} keep {{print}} /PASS captured compiler metadata/ {{print}}'"],
               environment={'XDEBUG_MODE': 'coverage', 'RCS_DISPOSABLE_OPCODE_MAP': '1'})
     print(f'PASS Docker validation: WordPress {WORDPRESS}, PHP {PHP}', flush=True)
 finally:
