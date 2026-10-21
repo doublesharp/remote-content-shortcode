@@ -15,10 +15,10 @@ class Remote_Content_Shortcode_Admin {
 		foreach ( array( 'url', 'selector', 'remove', 'fallback', 'userpwd' ) as $key ) {
 			if ( isset( $input[ $key ] ) && is_string( $input[ $key ] ) ) { $atts[ $key ] = $input[ $key ]; }
 		}
-		foreach ( array( 'cache', 'rewrite_urls' ) as $key ) {
+		foreach ( array( 'rewrite_urls' ) as $key ) {
 			if ( isset( $input[ $key ] ) && is_string( $input[ $key ] ) && in_array( $input[ $key ], array( 'true', 'false' ), true ) ) { $atts[ $key ] = $input[ $key ]; }
 		}
-		foreach ( array( 'cache_ttl', 'stale_ttl', 'timeout' ) as $key ) {
+		foreach ( array( 'timeout' ) as $key ) {
 			if ( isset( $input[ $key ] ) && is_scalar( $input[ $key ] ) && is_numeric( $input[ $key ] ) ) { $atts[ $key ] = (string) max( 0, (float) $input[ $key ] ); }
 		}
 		if ( isset( $atts['userpwd'] ) && ! preg_match( '/^[A-Za-z0-9_.-]*$/D', $atts['userpwd'] ) ) { return new WP_Error( 'invalid_alias', __( 'Enter a configured credential alias.', 'remote-content-shortcode' ) ); }
@@ -61,18 +61,18 @@ class Remote_Content_Shortcode_Admin {
 		echo '<form method="post">';
 		wp_nonce_field( 'rcs_tools' );
 		echo '<p>' . esc_html__( 'Enter public source settings to test. Enter a URL to clear its cache, or leave it empty to clear the plugin cache.', 'remote-content-shortcode' ) . '</p><table class="form-table">';
-		$fields = array( 'url' => __( 'Source URL', 'remote-content-shortcode' ), 'selector' => __( 'CSS selector', 'remote-content-shortcode' ), 'remove' => __( 'Remove selector', 'remote-content-shortcode' ), 'userpwd' => __( 'Credential alias', 'remote-content-shortcode' ), 'fallback' => __( 'Fallback HTML', 'remote-content-shortcode' ), 'cache_ttl' => __( 'Cache lifetime (seconds)', 'remote-content-shortcode' ), 'stale_ttl' => __( 'Stale lifetime (seconds)', 'remote-content-shortcode' ), 'timeout' => __( 'Timeout (seconds)', 'remote-content-shortcode' ) );
+		$fields = array( 'url' => __( 'Source URL', 'remote-content-shortcode' ), 'selector' => __( 'CSS selector', 'remote-content-shortcode' ), 'remove' => __( 'Remove selector', 'remote-content-shortcode' ), 'userpwd' => __( 'Credential alias', 'remote-content-shortcode' ), 'fallback' => __( 'Fallback HTML', 'remote-content-shortcode' ), 'timeout' => __( 'Timeout (seconds)', 'remote-content-shortcode' ) );
 		foreach ( $fields as $key => $label ) {
-			$default = array( 'cache_ttl' => '3600', 'stale_ttl' => '0', 'timeout' => '5' );
-			$limits = array( 'cache_ttl' => array( 1, 86400 ), 'stale_ttl' => array( 0, 86400 ), 'timeout' => array( 1, 5 ) );
+			$default = array( 'timeout' => '5' );
+			$limits = array( 'timeout' => array( 1, 5 ) );
 			// Do not echo submitted URLs, query parameters, or aliases back into the page.
 			echo '<tr><th><label for="rcs-' . esc_attr( $key ) . '">' . esc_html( $label ) . '</label></th><td><input class="regular-text" id="rcs-' . esc_attr( $key ) . '" name="' . esc_attr( $key ) . '" type="' . ( isset( $default[ $key ] ) ? 'number' : 'text' ) . '"';
 			if ( isset( $limits[ $key ] ) ) { echo ' min="' . esc_attr( $limits[ $key ][0] ) . '" max="' . esc_attr( $limits[ $key ][1] ) . '"'; }
 			echo ' value="' . esc_attr( $default[ $key ] ?? '' ) . '"></td></tr>';
 		}
-		foreach ( array( 'cache' => __( 'Cache response', 'remote-content-shortcode' ), 'rewrite_urls' => __( 'Rewrite relative URLs', 'remote-content-shortcode' ) ) as $key => $label ) {
+		foreach ( array( 'rewrite_urls' => __( 'Rewrite relative URLs', 'remote-content-shortcode' ) ) as $key => $label ) {
 			echo '<tr><th><label for="rcs-' . esc_attr( $key ) . '">' . esc_html( $label ) . '</label></th><td><select id="rcs-' . esc_attr( $key ) . '" name="' . esc_attr( $key ) . '"><option value="true">' . esc_html__( 'Yes', 'remote-content-shortcode' ) . '</option><option value="false"' . ( 'rewrite_urls' === $key ? ' selected' : '' ) . '>' . esc_html__( 'No', 'remote-content-shortcode' ) . '</option></select></td></tr>';
 		}
-		echo '</table><p>' . esc_html__( 'Credentials must be configured outside the editor. Enter an alias only.', 'remote-content-shortcode' ) . '</p><p><button class="button button-primary" name="rcs_action" value="test">' . esc_html__( 'Test content', 'remote-content-shortcode' ) . '</button> <button class="button" name="rcs_action" value="clear">' . esc_html__( 'Clear cache', 'remote-content-shortcode' ) . '</button></p></form></div>';
+		echo '</table><p>' . esc_html__( 'Test requests fetch fresh content and bypass visitor caching. Cache settings belong in the shortcode or block.', 'remote-content-shortcode' ) . '</p><p>' . esc_html__( 'Credentials must be configured outside the editor. Enter an alias only.', 'remote-content-shortcode' ) . '</p><p><button class="button button-primary" name="rcs_action" value="test">' . esc_html__( 'Test content', 'remote-content-shortcode' ) . '</button> <button class="button" name="rcs_action" value="clear">' . esc_html__( 'Clear cache', 'remote-content-shortcode' ) . '</button></p></form></div>';
 	}
 }

@@ -92,6 +92,8 @@ if ( ! class_exists( 'RemoteContentShortcode' ) ) {
 			$start = microtime( true );
 			$this->last_result = array( 'ok' => false, 'error_code' => '', 'http_status' => null, 'cache_status' => 'disabled', 'selector_matches' => null, 'duration_ms' => 0 );
 			$fallback = is_array( $atts ) && is_string( $atts['fallback'] ?? null ) ? $atts['fallback'] : '';
+			$atts = $this->normalize_attributes( $atts );
+			if ( is_array( $atts ) ) { $fallback = is_string( $atts['fallback'] ?? null ) ? $atts['fallback'] : ''; }
 			if ( strlen( $fallback ) > 4096 ) { return $this->fail( 'invalid_fallback' ); }
 			$output = $this->render_shortcode( $atts, $content );
 			if ( '' === $output && '' !== $fallback ) { $output = wp_kses_post( $fallback ); }
@@ -100,11 +102,11 @@ if ( ! class_exists( 'RemoteContentShortcode' ) ) {
 			return $output;
 		}
 
-		private function render_shortcode( $atts, $content ) {
+		private function normalize_attributes( $atts ) {
 			$atts = is_array( $atts ) ? $atts : array();
 			foreach ( $atts as $value ) {
 				if ( ! is_scalar( $value ) ) {
-					return $this->fail( 'invalid_attributes' );
+					return new WP_Error( 'invalid_attributes' );
 				}
 			}
 			if ( isset( $atts['decode_atts'] ) && 'true' === strtolower( trim( html_entity_decode( (string) $atts['decode_atts'], ENT_QUOTES | ENT_HTML5, 'UTF-8' ), '"' ) ) ) {
@@ -116,6 +118,11 @@ if ( ! class_exists( 'RemoteContentShortcode' ) ) {
 				}
 				unset( $value );
 			}
+			return $atts;
+		}
+
+		private function render_shortcode( $atts, $content ) {
+			if ( is_wp_error( $atts ) ) { return $this->fail( $atts ); }
 			$atts = shortcode_atts( array(
 				'userpwd' => '', 'method' => 'GET', 'timeout' => 10, 'url' => '',
 				'selector' => '', 'remove' => '', 'find' => '', 'replace' => '',

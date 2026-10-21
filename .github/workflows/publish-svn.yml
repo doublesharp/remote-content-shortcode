@@ -21,6 +21,8 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 6
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -39,7 +41,8 @@ jobs:
           fi
           git merge-base --is-ancestor HEAD origin/main
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-      - name: Ensure this version is new in SVN
+      - name: Inspect the SVN version
+        id: svn-version
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -54,8 +57,11 @@ jobs:
           from pathlib import Path
           import xml.etree.ElementTree as ET
           tags = ET.parse(Path(os.environ['RUNNER_TEMP']) / 'svn-tags.xml')
-          if any(name.text == os.environ['VERSION'] for name in tags.findall('.//entry/name')):
-              raise SystemExit('This SVN version already exists. Choose a new version; releases are not overwritten.')
+          exists = any(name.text == os.environ['VERSION'] for name in tags.findall('.//entry/name'))
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('exists=' + str(exists).lower() + '\n')
+          if exists:
+              print('SVN version already exists; its contents must match before recovery can continue.')
           PY
       - name: Build the release ZIP in Docker
         run: |
@@ -67,6 +73,15 @@ jobs:
             --entrypoint php wordpress:cli-php8.2 \
             /source/tools/package.php "$RUNNER_TEMP/rcs-release/plugin.zip"
           unzip -q "$RUNNER_TEMP/rcs-release/plugin.zip" -d "$RUNNER_TEMP/rcs-release"
+      - name: Verify an existing SVN version before resuming
+        if: steps.svn-version.outputs.exists == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          timeout 60 svn export --non-interactive \
+            "https://plugins.svn.wordpress.org/remote-content-shortcode/tags/$VERSION" \
+            "$RUNNER_TEMP/rcs-svn-existing"
+          diff -qr "$RUNNER_TEMP/rcs-release/remote-content-shortcode" "$RUNNER_TEMP/rcs-svn-existing"
       - name: Check deployment configuration
         env:
           SVN_USERNAME: ${{ vars.SVN_USERNAME }}
@@ -77,6 +92,7 @@ jobs:
           test -n "$SVN_USERNAME"
           test -n "$SVN_PASSWORD"
       - name: Deploy the packaged files to SVN
+        if: steps.svn-version.outputs.exists != 'true'
         uses: 10up/action-wordpress-plugin-deploy@54bd289b8525fd23a5c365ec369185f2966529c2 # 2.3.0
         with:
           dry-run: ${{ github.event_name == 'workflow_dispatch' }}
@@ -87,7 +103,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           BUILD_DIR: ${{ runner.temp }}/rcs-release/remote-content-shortcode
       - name: Verify the published SVN tag matches the package
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && steps.svn-version.outputs.exists != 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -99,9 +115,44 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
           EVENT_NAME: ${{ github.event_name }}
+          SVN_EXISTS: ${{ steps.svn-version.outputs.exists }}
         run: |
           if [ "$EVENT_NAME" = workflow_dispatch ]; then
             echo "SVN dry run completed for $VERSION. No SVN commit was made." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$SVN_EXISTS" = true ]; then
+            echo "Existing SVN version $VERSION matches the package. Resuming GitHub release publication without an SVN commit." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "Version $VERSION uploaded to WordPress SVN. Directory reopening and release confirmation are separate." >> "$GITHUB_STEP_SUMMARY"
           fi
+      - name: Prepare GitHub release files
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cp "$RUNNER_TEMP/rcs-release/plugin.zip" \
+            "$RUNNER_TEMP/rcs-release/remote-content-shortcode-$VERSION.zip"
+          cd "$RUNNER_TEMP/rcs-release"
+          sha256sum "remote-content-shortcode-$VERSION.zip" > "remote-content-shortcode-$VERSION.zip.sha256"
+          sha256sum --check "remote-content-shortcode-$VERSION.zip.sha256"
+          cd "$GITHUB_WORKSPACE"
+          python3 tools/github-release.py --prepare-only \
+            --tag "$VERSION" --version "$VERSION" --directory "$RUNNER_TEMP/rcs-release"
+      - name: Retain verified ZIP and checksum
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wordpress-release-${{ steps.version.outputs.version }}
+          path: |
+            ${{ runner.temp }}/rcs-release/remote-content-shortcode-${{ steps.version.outputs.version }}.zip
+            ${{ runner.temp }}/rcs-release/remote-content-shortcode-${{ steps.version.outputs.version }}.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish GitHub release assets
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 tools/github-release.py \
+            --tag "$RELEASE_TAG" --version "$VERSION" \
+            --directory "$RUNNER_TEMP/rcs-release"

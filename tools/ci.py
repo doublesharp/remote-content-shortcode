@@ -74,7 +74,7 @@ def wp(name, arguments, **options):
 try:
     # Copy only source inputs. Local .env, SVN/Git metadata, and evidence never enter Docker.
     for name in ('remote-content-shortcode.php', 'readme.txt', 'LICENSE.txt', 'third-party.txt',
-                 'composer.json', 'composer.lock', 'uninstall.php', 'inc', 'blocks', 'docs', 'tests', 'tools'):
+                 'composer.json', 'composer.lock', 'SECURITY.md', 'uninstall.php', 'inc', 'blocks', 'docs', 'tests', 'tools'):
         source = ROOT / name
         if source.is_dir():
             shutil.copytree(source, SOURCE / name, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
@@ -140,6 +140,7 @@ try:
     wp('upgrade-plugin', ['plugin', 'install', '/reports/' + archive.name, '--force'])
     wp('upgrade-verify', ['eval-file', '/source/tests/upgrade-from-1.5.php'])
     wp('cve-regression', ['eval-file', '/source/tests/cve-regression.php'])
+    wp('encoded-fallback', ['eval-file', '/source/tests/encoded-fallback.php'])
     wp('install-plugin-check', ['plugin', 'install', '/work/plugin-check.zip', '--activate'])
     for suite in ('regression', 'integration-transport', 'features-integration', 'content-auth-features',
                   'cache-features', 'admin-block-features', 'transport'):

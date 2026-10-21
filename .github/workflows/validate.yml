@@ -29,6 +29,8 @@ jobs:
           persist-credentials: false
       - name: Validate release metadata
         run: python3 tools/release-version.py
+      - name: Verify release asset publication safeguards
+        run: timeout 30 python3 tests/release-assets.py
       - name: Run bounded Docker checks
         env:
           RCS_WORDPRESS_VERSION: ${{ matrix.wordpress }}

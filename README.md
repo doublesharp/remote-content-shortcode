@@ -20,7 +20,7 @@ Bring selected content from another site into WordPress. Choose the elements to 
 
 ## Quick start
 
-Install a packaged plugin ZIP through **Plugins → Add New → Upload Plugin**, then activate **Remote Content Shortcode**. The package includes its CSS selector dependency.
+Download the installable `remote-content-shortcode-VERSION.zip` from [GitHub Releases](https://github.com/doublesharp/remote-content-shortcode/releases) once a release is published. Each release includes a SHA256 checksum. Upload the plugin ZIP through **Plugins → Add New → Upload Plugin**, then activate **Remote Content Shortcode**. The package includes its CSS selector dependency.
 
 Add a Shortcode block to a post or page:
 
@@ -154,6 +154,12 @@ IPv6-only hosts, literal IPv6 URLs, private intranet imports, and proxy-only out
 Review existing imports before upgrading. Version 2 removes executable remote markup and implicit credential lookup, replaces phpQuery with a bundled Symfony CSS selector implementation, and adds bounded caching and processing. jQuery-only selectors such as `:eq()` are unsupported. Imports that rely on scripts, private URLs, compressed responses, or the former SSL-bypass settings need adjustment.
 
 The [security and compatibility reference](docs/security.md) describes these restrictions and migration considerations in full.
+
+Follow the [upgrade checklist](docs/upgrading.md) when moving from 1.x. For failed or empty imports, start with [troubleshooting](docs/troubleshooting.md), which explains diagnostic codes and cache behavior.
+
+## Reporting problems
+
+Use [GitHub Issues](https://github.com/doublesharp/remote-content-shortcode/issues) for general bugs, including a minimal example and the relevant plugin, WordPress, and PHP versions. Report suspected vulnerabilities privately using the instructions in [SECURITY.md](SECURITY.md).
 
 ## License
 

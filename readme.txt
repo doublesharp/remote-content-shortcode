@@ -125,7 +125,15 @@ The SyntaxHighlighter integration processes only remote_content shortcodes and s
 
 = Why is my shortcode empty? =
 
-Check that the URL is public and accessible from the WordPress server, the remote service supports uncompressed responses, and any CSS selector matches the document. For authenticated requests, configure an alias with the correct origin, exact endpoint path, storage type, key, and allowed method. A developer can inspect the remote_content_shortcode_error action for diagnostic codes.
+Open Tools > Remote content as an administrator and test the source URL and selectors. Check the HTTP status, error code, match count, and sanitized preview. Administrator diagnostics fetch fresh content and bypass visitor caching. The installed docs/troubleshooting.md explains common error codes and remedies. For authenticated requests, check the alias's origin, path, method, and storage configuration.
+
+= How do I upgrade from 1.x? =
+
+Follow docs/upgrading.md in the installed plugin or the GitHub repository. Check PHP/WordPress requirements, replace unsupported selectors, configure explicit credential aliases, and test imports on staging and as a logged-out visitor. Existing posts and credential storage are preserved; aliases are not created automatically.
+
+= How do I report a security issue? =
+
+Use the private vulnerability reporting form at https://github.com/doublesharp/remote-content-shortcode/security/advisories/new. Include a minimal proof of concept using test data, affected versions, and required permissions. Do not post live credentials or exploit details in public issues. See SECURITY.md in the plugin for details.
 
 = Can I import private intranet content or execute remote scripts? =
 
@@ -144,6 +152,7 @@ Security update. Requires WordPress 6.6 and PHP 8.2 with DOM and cURL. HTML is s
 
 = 2.0 =
 * Fix CVE-2023-45652, local file inclusion; CVE-2024-2089, stored cross-site scripting; and CVE-2024-2090, server-side request forgery.
+* Decode entity-encoded fallback attributes consistently, simplify administrator test controls, and add troubleshooting and upgrade guides.
 * Sanitize all rendered remote HTML, including replacement and filter output.
 * Replace direct cURL fetches with WordPress safe HTTP requests and pin validated public addresses to prevent DNS rebinding.
 * Validate every redirect, verify TLS, and limit request time, response size, output expansion, and replacement count.

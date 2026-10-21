@@ -57,6 +57,8 @@ try {
 	ob_start();
 	Remote_Content_Shortcode_Admin::page();
 	$page_html = ob_get_clean();
+	rcs_ab_assert( ! preg_match( '/name="(?:cache|cache_ttl|stale_ttl)"/', $page_html ), 'Administrator test form offers ineffective cache settings.' );
+	rcs_ab_assert( str_contains( $page_html, esc_html__( 'Test requests fetch fresh content and bypass visitor caching. Cache settings belong in the shortcode or block.', 'remote-content-shortcode' ) ), 'Administrator test form does not explain cache bypass.' );
 	rcs_ab_assert( ! str_contains( $page_html, 'secret' ) && ! str_contains( $page_html, 'private-marker' ) && ! str_contains( $page_html, '127.0.0.1' ), 'Admin page echoed source URL secrets.' );
 	foreach ( array( 'Successful import', 'Error code', 'HTTP status', 'Cache', 'Matching elements', 'Elapsed time (ms)', 'Not available' ) as $label ) {
 		rcs_ab_assert( str_contains( $page_html, esc_html( __( $label, 'remote-content-shortcode' ) ) ), 'Admin page omitted readable diagnostic label.' );
