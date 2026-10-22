@@ -7,6 +7,24 @@ class Remote_Content_Shortcode_Admin {
 	private static function fields() {
 		return array( 'url' => 'Source URL', 'selector' => 'CSS selector', 'remove' => 'Remove selector', 'userpwd' => 'Credential alias', 'fallback' => 'Fallback HTML', 'timeout' => 'Timeout (seconds)', 'method' => 'HTTP method', 'find' => 'Find pattern', 'replace' => 'Replacement', 'params' => 'Forward query parameters', 'htmlentities' => 'Encode HTML entities', 'strip_tags' => 'Strip HTML tags', 'cache' => 'Enable public GET cache', 'cache_ttl' => 'Cache lifetime (seconds)', 'stale_ttl' => 'Stale lifetime (seconds)', 'rewrite_urls' => 'Rewrite relative URLs' );
 	}
+	/** Retain only bounded public form fields, never secrets or inline credentials. */
+	private static function form_values( $input, $defaults ) {
+		$values = $defaults;
+		$choices = array( 'method' => array( 'GET', 'POST' ), 'auth' => array( 'basic', 'bearer', 'api_key' ) );
+		foreach ( array( 'rewrite_urls', 'cache', 'strip_tags', 'htmlentities' ) as $key ) { $choices[ $key ] = array( 'true', 'false' ); }
+		foreach ( $defaults as $key => $default ) {
+			$value = $input[ $key ] ?? null;
+			if ( ! is_string( $value ) || strlen( $value ) > ( 'body' === $key ? 65536 : 4096 ) ) { continue; }
+			if ( isset( $choices[ $key ] ) && ! in_array( $value, $choices[ $key ], true ) ) { continue; }
+			if ( in_array( $key, array( 'alias', 'userpwd' ), true ) && ! preg_match( '/^[A-Za-z0-9_.-]{0,64}$/D', $value ) ) { continue; }
+			if ( in_array( $key, array( 'url', 'origin' ), true ) ) {
+				$url = wp_parse_url( $value );
+				if ( false === $url || isset( $url['user'] ) || isset( $url['pass'] ) || ( 'origin' === $key && ( isset( $url['query'] ) || isset( $url['fragment'] ) ) ) ) { continue; }
+			}
+			$values[ $key ] = $value;
+		}
+		return $values;
+	}
 	public static function process_action( $input ) {
 		if ( ! current_user_can( 'manage_options' ) ) { return new WP_Error( 'forbidden', __( 'Administrator access required.', 'remote-content-shortcode' ) ); }
 		$nonce = isset( $input['_wpnonce'] ) && is_string( $input['_wpnonce'] ) ? $input['_wpnonce'] : '';
@@ -44,7 +62,7 @@ class Remote_Content_Shortcode_Admin {
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only navigation uses the validated tab allowlist.
 		$requested_tab = is_string( $_GET['tab'] ?? null ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : '';
 		$tab = isset( $tabs[ $requested_tab ] ) ? $requested_tab : 'builder';
-		$result = null;
+		$result = null; $input = array();
 		$method = is_string( $_SERVER['REQUEST_METHOD'] ?? null ) ? sanitize_text_field( wp_unslash( $_SERVER['REQUEST_METHOD'] ) ) : '';
 		if ( 'POST' === $method ) {
 			if ( 'connections' === $tab ) {
@@ -52,15 +70,15 @@ class Remote_Content_Shortcode_Admin {
 				if ( 'save' === ( $input['connection_action'] ?? '' ) ) { $result = Remote_Content_Shortcode_Connections::save( $input ); }
 				elseif ( 'delete' === ( $input['connection_action'] ?? '' ) && is_string( $input['alias'] ?? null ) ) { $result = Remote_Content_Shortcode_Connections::delete( $input['alias'] ); }
 				else { $result = new WP_Error( 'invalid_action' ); }
-			} elseif ( in_array( $tab, array( 'builder', 'cache' ), true ) ) { check_admin_referer( 'rcs_tools' ); $result = self::process_action( wp_unslash( $_POST ) ); }
+			} elseif ( in_array( $tab, array( 'builder', 'cache' ), true ) ) { check_admin_referer( 'rcs_tools' ); $input = wp_unslash( $_POST ); $result = self::process_action( $input ); }
 		}
 		echo '<div class="wrap"><h1>' . esc_html__( 'Remote content', 'remote-content-shortcode' ) . '</h1><nav class="nav-tab-wrapper">';
 		foreach ( $tabs as $slug => $label ) { echo '<a class="nav-tab' . ( $slug === $tab ? ' nav-tab-active' : '' ) . '" href="' . esc_url( add_query_arg( array( 'page' => 'remote-content-shortcode', 'tab' => $slug ), admin_url( 'tools.php' ) ) ) . '">' . esc_html( $label ) . '</a>'; }
 		echo '</nav>';
 		self::result( $result, $tab );
 		switch ( $tab ) {
-			case 'builder': self::builder(); break;
-			case 'connections': self::connections(); break;
+			case 'builder': self::builder( $input ); break;
+			case 'connections': self::connections( is_wp_error( $result ) && 'save' === ( $input['connection_action'] ?? '' ) ? $input : array() ); break;
 			case 'cache': self::cache(); break;
 			case 'usage': self::usage(); break;
 			case 'help': self::help(); break;
@@ -93,43 +111,53 @@ class Remote_Content_Shortcode_Admin {
 				echo '<dt>' . esc_html( $label ) . '</dt><dd>' . esc_html( $value ) . '</dd>';
 			}
 			echo '</dl>';
-			if ( is_string( $result['html'] ?? null ) ) { echo '<h2>' . esc_html__( 'Preview', 'remote-content-shortcode' ) . '</h2><div>' . wp_kses_post( $result['html'] ) . '</div><details><summary>' . esc_html__( 'Sanitized HTML', 'remote-content-shortcode' ) . '</summary><textarea class="large-text code" readonly rows="6">' . esc_textarea( wp_kses_post( $result['html'] ) ) . '</textarea></details>'; }
+			if ( is_string( $result['html'] ?? null ) ) {
+				$html = wp_kses_post( $result['html'] );
+				$preview = '<!doctype html><html lang="' . esc_attr( get_bloginfo( 'language' ) ) . '" dir="' . ( is_rtl() ? 'rtl' : 'ltr' ) . '"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src http: https: data:; base-uri \'none\'; form-action \'none\'"><meta name="viewport" content="width=device-width, initial-scale=1"><title>' . esc_html__( 'Remote content preview', 'remote-content-shortcode' ) . '</title></head><body>' . $html . '</body></html>';
+				echo '<h2>' . esc_html__( 'Preview', 'remote-content-shortcode' ) . '</h2><iframe sandbox title="' . esc_attr__( 'Remote content preview', 'remote-content-shortcode' ) . '" referrerpolicy="no-referrer" style="width:100%;height:20rem;box-sizing:border-box;border:1px solid #c3c4c7;background:#fff" srcdoc="' . esc_attr( $preview ) . '"></iframe><details><summary>' . esc_html__( 'Sanitized HTML', 'remote-content-shortcode' ) . '</summary><textarea class="large-text code" readonly rows="6" aria-label="' . esc_attr__( 'Sanitized HTML', 'remote-content-shortcode' ) . '">' . esc_textarea( $html ) . '</textarea></details>';
+			}
 		}
 	}
-	private static function builder() {
+	private static function builder( $input = array() ) {
 		echo '<form method="post">'; wp_nonce_field( 'rcs_tools' );
 		echo '<p>' . esc_html__( 'Enter public source settings to test. Enter a URL to clear its cache, or leave it empty to clear the plugin cache.', 'remote-content-shortcode' ) . '</p><table class="form-table">';
-		$defaults = array( 'timeout' => '5', 'cache_ttl' => '3600', 'stale_ttl' => '0' );
+		$numbers = array( 'timeout' => '5', 'cache_ttl' => '3600', 'stale_ttl' => '0' );
+		$values = self::form_values( $input, array_merge( array_fill_keys( array_keys( self::fields() ), '' ), $numbers, array( 'body' => '', 'method' => 'GET', 'cache' => 'true', 'htmlentities' => 'false', 'strip_tags' => 'false', 'rewrite_urls' => 'false' ) ) );
 		foreach ( self::fields() as $key => $label ) {
 			echo '<tr><th><label for="rcs-' . esc_attr( $key ) . '">' . esc_html( $label ) . '</label></th><td>';
 			if ( in_array( $key, array( 'rewrite_urls', 'cache', 'strip_tags', 'htmlentities' ), true ) ) {
-				echo '<select id="rcs-' . esc_attr( $key ) . '" name="' . esc_attr( $key ) . '"><option value="true"' . ( 'cache' === $key ? ' selected' : '' ) . '>' . esc_html__( 'Yes', 'remote-content-shortcode' ) . '</option><option value="false"' . ( 'cache' === $key ? '' : ' selected' ) . '>' . esc_html__( 'No', 'remote-content-shortcode' ) . '</option></select>';
-			} elseif ( 'method' === $key ) { echo '<select id="rcs-method" name="method"><option>GET</option><option>POST</option></select>'; }
-			else {
-				echo '<input class="regular-text" id="rcs-' . esc_attr( $key ) . '" name="' . esc_attr( $key ) . '" type="' . ( isset( $defaults[ $key ] ) ? 'number' : 'text' ) . '"';
-				if ( 'timeout' === $key ) { echo ' min="1" max="5"'; } elseif ( isset( $defaults[ $key ] ) ) { echo ' min="0" max="86400"'; }
-				echo ' value="' . esc_attr( $defaults[ $key ] ?? '' ) . '">';
+				echo '<select id="rcs-' . esc_attr( $key ) . '" name="' . esc_attr( $key ) . '"><option value="true"' . ( 'true' === $values[ $key ] ? ' selected' : '' ) . '>' . esc_html__( 'Yes', 'remote-content-shortcode' ) . '</option><option value="false"' . ( 'false' === $values[ $key ] ? ' selected' : '' ) . '>' . esc_html__( 'No', 'remote-content-shortcode' ) . '</option></select>';
+			} elseif ( 'method' === $key ) {
+				echo '<select id="rcs-method" name="method">';
+				foreach ( array( 'GET', 'POST' ) as $method ) { echo '<option value="' . esc_attr( $method ) . '"' . selected( $values[ $key ], $method, false ) . '>' . esc_html( $method ) . '</option>'; }
+				echo '</select>';
+			} else {
+				echo '<input class="regular-text" id="rcs-' . esc_attr( $key ) . '" name="' . esc_attr( $key ) . '" type="' . ( isset( $numbers[ $key ] ) ? 'number' : 'text' ) . '"';
+				if ( 'timeout' === $key ) { echo ' min="1" max="30"'; } elseif ( isset( $numbers[ $key ] ) ) { echo ' min="0" max="86400"'; }
+				echo ' value="' . esc_attr( $values[ $key ] ) . '">';
 			}
 			echo '</td></tr>';
 		}
-		echo '<tr><th><label for="rcs-body">' . esc_html__( 'POST body', 'remote-content-shortcode' ) . '</label></th><td><textarea class="large-text code" id="rcs-body" name="body" rows="4" maxlength="65536"></textarea></td></tr></table><p>' . esc_html__( 'Test requests fetch fresh content and bypass visitor caching. Cache settings belong in the shortcode or block.', 'remote-content-shortcode' ) . '</p><p>' . esc_html__( 'Use a connection alias only. Manage secrets on the Connections tab.', 'remote-content-shortcode' ) . '</p><p><button class="button button-primary" name="rcs_action" value="generate">' . esc_html__( 'Generate shortcode', 'remote-content-shortcode' ) . '</button> <button class="button" name="rcs_action" value="test">' . esc_html__( 'Test content', 'remote-content-shortcode' ) . '</button> <button class="button" name="rcs_action" value="clear">' . esc_html__( 'Clear cache', 'remote-content-shortcode' ) . '</button></p></form>';
+		echo '<tr><th><label for="rcs-body">' . esc_html__( 'POST body', 'remote-content-shortcode' ) . '</label></th><td><textarea class="large-text code" id="rcs-body" name="body" rows="4" maxlength="65536">' . esc_textarea( $values['body'] ) . '</textarea></td></tr></table><p>' . esc_html__( 'Test requests fetch fresh content and bypass visitor caching. Cache settings belong in the shortcode or block.', 'remote-content-shortcode' ) . '</p><p>' . esc_html__( 'Shortcode timeouts can be up to 30 seconds. Test requests are capped at five seconds.', 'remote-content-shortcode' ) . '</p><p>' . esc_html__( 'Use a connection alias only. Manage secrets on the Connections tab.', 'remote-content-shortcode' ) . '</p><p><button class="button button-primary" name="rcs_action" value="generate">' . esc_html__( 'Generate shortcode', 'remote-content-shortcode' ) . '</button> <button class="button" name="rcs_action" value="test">' . esc_html__( 'Test content', 'remote-content-shortcode' ) . '</button> <button class="button" name="rcs_action" value="clear">' . esc_html__( 'Clear cache', 'remote-content-shortcode' ) . '</button></p></form>';
 	}
-	private static function connections() {
+	private static function connections( $input = array() ) {
 		echo '<h2>' . esc_html__( 'Connections', 'remote-content-shortcode' ) . '</h2><p>' . esc_html__( 'Credentials apply only to the exact HTTPS origin, path and methods below. Saved secrets are encrypted with the WordPress salts. Back up those salts before changing them.', 'remote-content-shortcode' ) . '</p>';
 		$all = Remote_Content_Shortcode_Connections::all();
 		foreach ( $all as $alias => $row ) {
 			if ( $row['read_only'] ) { echo '<p><code>' . esc_html( $alias ) . '</code> ' . esc_html__( 'Configured in PHP, read only.', 'remote-content-shortcode' ) . '</p>'; }
-			else { self::connection_form( $alias, $row ); }
+			else { self::connection_form( $alias, $row, $alias === ( $input['alias'] ?? null ) ? $input : array() ); }
 		}
-		if ( count( array_filter( $all, static fn( $row ) => ! $row['read_only'] ) ) < Remote_Content_Shortcode_Connections::LIMIT ) { echo '<h3>' . esc_html__( 'Add connection', 'remote-content-shortcode' ) . '</h3>'; self::connection_form( '', array() ); }
+		if ( count( array_filter( $all, static fn( $row ) => ! $row['read_only'] ) ) < Remote_Content_Shortcode_Connections::LIMIT ) { echo '<h3>' . esc_html__( 'Add connection', 'remote-content-shortcode' ) . '</h3>'; self::connection_form( '', array(), is_string( $input['alias'] ?? null ) && isset( $all[ $input['alias'] ] ) && ! $all[ $input['alias'] ]['read_only'] ? array() : $input ); }
 	}
-	private static function connection_form( $alias, $row ) {
+	private static function connection_form( $alias, $row, $input = array() ) {
+		$values = self::form_values( $input, array( 'alias' => $alias, 'origin' => $row['origin'] ?? '', 'path' => $row['path'] ?? '', 'header' => $row['header'] ?? 'X-API-Key', 'auth' => $row['auth'] ?? 'bearer' ) );
+		$methods = $input ? array_values( array_intersect( array( 'GET', 'POST' ), is_array( $input['methods'] ?? null ) ? array_filter( $input['methods'], 'is_string' ) : array() ) ) : ( $row['methods'] ?? array( 'GET' ) );
 		echo '<form method="post">'; wp_nonce_field( 'rcs_connections' ); echo '<table class="form-table">';
-		foreach ( array( 'alias' => 'Alias', 'origin' => 'HTTPS origin', 'path' => 'Exact endpoint path', 'header' => 'API key header' ) as $key => $label ) { echo '<tr><th>' . esc_html( $label ) . '</th><td><input aria-label="' . esc_attr( $label ) . '" class="regular-text" name="' . esc_attr( $key ) . '" value="' . esc_attr( 'alias' === $key ? $alias : ( $row[ $key ] ?? ( 'header' === $key ? 'X-API-Key' : '' ) ) ) . '"' . ( 'alias' === $key && '' !== $alias ? ' readonly' : '' ) . '></td></tr>'; }
+		foreach ( array( 'alias' => 'Alias', 'origin' => 'HTTPS origin', 'path' => 'Exact endpoint path', 'header' => 'API key header' ) as $key => $label ) { echo '<tr><th>' . esc_html( $label ) . '</th><td><input type="text" aria-label="' . esc_attr( $label ) . '" class="regular-text" name="' . esc_attr( $key ) . '" value="' . esc_attr( $values[ $key ] ) . '"' . ( 'alias' === $key && '' !== $alias ? ' readonly' : '' ) . '></td></tr>'; }
 		echo '<tr><th>' . esc_html__( 'Authentication', 'remote-content-shortcode' ) . '</th><td><select name="auth" aria-label="' . esc_attr__( 'Authentication', 'remote-content-shortcode' ) . '">';
-		foreach ( array( 'basic' => 'Basic', 'bearer' => 'Bearer', 'api_key' => 'API key' ) as $key => $label ) { echo '<option value="' . esc_attr( $key ) . '"' . selected( $row['auth'] ?? 'bearer', $key, false ) . '>' . esc_html( $label ) . '</option>'; }
+		foreach ( array( 'basic' => 'Basic', 'bearer' => 'Bearer', 'api_key' => 'API key' ) as $key => $label ) { echo '<option value="' . esc_attr( $key ) . '"' . selected( $values['auth'], $key, false ) . '>' . esc_html( $label ) . '</option>'; }
 		echo '</select></td></tr><tr><th>' . esc_html__( 'Allowed methods', 'remote-content-shortcode' ) . '</th><td>';
-		foreach ( array( 'GET', 'POST' ) as $method ) { echo '<label><input type="checkbox" name="methods[]" value="' . esc_attr( $method ) . '"' . checked( in_array( $method, $row['methods'] ?? array( 'GET' ), true ), true, false ) . '> ' . esc_html( $method ) . '</label> '; }
+		foreach ( array( 'GET', 'POST' ) as $method ) { echo '<label><input type="checkbox" name="methods[]" value="' . esc_attr( $method ) . '"' . checked( in_array( $method, $methods, true ), true, false ) . '> ' . esc_html( $method ) . '</label> '; }
 		echo '</td></tr><tr><th>' . esc_html__( 'Secret', 'remote-content-shortcode' ) . '</th><td><input type="password" autocomplete="new-password" name="secret" value="" aria-label="' . esc_attr__( 'Secret', 'remote-content-shortcode' ) . '"><p class="description">' . esc_html__( 'Basic uses username:password. Leave blank to keep an existing secret.', 'remote-content-shortcode' ) . '</p>';
 		if ( '' !== $alias ) { echo '<label><input type="checkbox" name="delete_secret" value="1"> ' . esc_html__( 'Remove saved secret', 'remote-content-shortcode' ) . '</label>'; }
 		echo '</td></tr></table><p><button class="button button-primary" name="connection_action" value="save">' . esc_html__( 'Save connection', 'remote-content-shortcode' ) . '</button> ';

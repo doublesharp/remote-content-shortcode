@@ -79,6 +79,90 @@ $tests['builder preserves quoted edge values through the real parser'] = static 
 	$generated = Remote_Content_Shortcode_Admin::process_action( $input );
 	rcs_free_assert( is_string( $generated ) && '"quoted [edge]"' === do_shortcode( $generated ), 'Builder lost literal edge quotes or brackets.' );
 };
+$document = static function ( $html ) {
+	$document = new DOMDocument();
+	$previous = libxml_use_internal_errors( true );
+	try { $document->loadHTML( '<?xml encoding="utf-8" ?>' . $html ); }
+	finally { libxml_clear_errors(); libxml_use_internal_errors( $previous ); }
+	return new DOMXPath( $document );
+};
+$tests['diagnostic previews isolate remote styles and landmarks'] = static function () use ( $document ) {
+	$render = new ReflectionMethod( Remote_Content_Shortcode_Admin::class, 'result' );
+	ob_start();
+	$render->invoke( null, array( 'html' => '<main><div id="preview-overlay" style="position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:2147483647">Remote preview</div><script>alert(1)</script></main>' ), 'builder' );
+	$html = ob_get_clean(); $xpath = $document( $html ); $frame = $xpath->query( '//iframe' )->item( 0 );
+	rcs_free_assert( $frame instanceof DOMElement && $frame->hasAttribute( 'sandbox' ) && '' === $frame->getAttribute( 'sandbox' ), 'Preview must use an iframe without sandbox permissions.' );
+	rcs_free_assert( '' !== $frame->getAttribute( 'title' ) && 'no-referrer' === $frame->getAttribute( 'referrerpolicy' ), 'Preview needs an accessible title and referrer protection.' );
+	rcs_free_assert( 0 === $xpath->query( '//main|//*[@id="preview-overlay"]|//script' )->length, 'Remote markup escaped into the admin document.' );
+	$preview = $document( $frame->getAttribute( 'srcdoc' ) );
+	rcs_free_assert( 1 === $preview->query( '//*[@id="preview-overlay"]' )->length && 0 === $preview->query( '//script' )->length, 'Isolated preview lost its content or bypassed sanitization.' );
+};
+$tests['sanitized diagnostic HTML has an accessible name'] = static function () use ( $document ) {
+	$render = new ReflectionMethod( Remote_Content_Shortcode_Admin::class, 'result' );
+	ob_start(); $render->invoke( null, array( 'html' => '<p>Preview</p>' ), 'builder' ); $xpath = $document( ob_get_clean() );
+	$field = $xpath->query( '//details/textarea' )->item( 0 );
+	rcs_free_assert( $field instanceof DOMElement && __( 'Sanitized HTML', 'remote-content-shortcode' ) === $field->getAttribute( 'aria-label' ), 'Sanitized HTML textarea is unlabeled.' );
+};
+$tests['builder retains public fields after generation and errors'] = static function () use ( $page, $document ) {
+	$input = array( '_wpnonce' => wp_create_nonce( 'rcs_tools' ), 'rcs_action' => 'generate', 'url' => 'http://source.rcs.test/ok?language=en', 'selector' => '[title="example"]', 'remove' => 'aside', 'userpwd' => 'public_alias', 'fallback' => '</textarea><b>Offline</b>', 'timeout' => '30', 'method' => 'POST', 'find' => '/old/', 'replace' => 'new', 'params' => 'language=en', 'htmlentities' => 'true', 'strip_tags' => 'true', 'cache' => 'false', 'cache_ttl' => '300', 'stale_ttl' => '600', 'rewrite_urls' => 'true', 'body' => 'q=hello&limit=5' );
+	foreach ( array( 'generate', 'test' ) as $action ) {
+		$input['rcs_action'] = $action; $xpath = $document( $page( 'builder', wp_slash( $input ) ) );
+		foreach ( $input as $name => $value ) {
+			if ( in_array( $name, array( '_wpnonce', 'rcs_action' ), true ) ) { continue; }
+			$field = $xpath->query( '//*[@name="' . $name . '"]' )->item( 0 );
+			$actual = $field instanceof DOMElement ? ( 'textarea' === $field->tagName ? $field->textContent : ( 'select' === $field->tagName ? $xpath->evaluate( 'string(option[@selected]/@value)', $field ) : $field->getAttribute( 'value' ) ) ) : null;
+			rcs_free_assert( $value === $actual, "Builder lost $name after $action." );
+		}
+	}
+};
+$tests['failed connection creation retains scope but never the secret'] = static function () use ( $page, $document, $fixture ) {
+	$input = $fixture( 'draft-connection' ); $input['connection_action'] = 'save'; $input['origin'] = 'http://example.com'; $input['path'] = '/draft'; $input['auth'] = 'api_key'; $input['header'] = 'X-Draft-Key'; $input['methods'] = array( 'POST' );
+	$html = $page( 'connections', $input ); $xpath = $document( $html );
+	foreach ( array( 'alias', 'origin', 'path', 'header' ) as $name ) { rcs_free_assert( $input[ $name ] === $xpath->evaluate( 'string(//input[@name="' . $name . '"]/@value)' ), "Connection lost $name after validation." ); }
+	rcs_free_assert( 'api_key' === $xpath->evaluate( 'string(//select[@name="auth"]/option[@selected]/@value)' ) && 'POST' === $xpath->evaluate( 'string(//input[@name="methods[]"][@checked]/@value)' ), 'Connection lost its authentication or method selection.' );
+	rcs_free_assert( ! str_contains( $html, $input['secret'] ) && '' === $xpath->evaluate( 'string(//input[@name="secret"]/@value)' ), 'Failed save echoed the connection secret.' );
+};
+$tests['failed connection edits retain only the submitted form'] = static function () use ( $page, $document, $fixture ) {
+	$original = $fixture(); rcs_free_assert( 'free-test' === Remote_Content_Shortcode_Connections::save( $original ), 'Could not create edit fixture.' );
+	$input = $original; $input['connection_action'] = 'save'; $input['origin'] = 'http://edited.example.com'; $input['path'] = '/edited'; unset( $input['methods'] );
+	$xpath = $document( $page( 'connections', $input ) ); $form = $xpath->query( '//form[.//input[@name="alias"][@value="free-test"]]' )->item( 0 );
+	rcs_free_assert( $form instanceof DOMElement && $input['origin'] === $xpath->evaluate( 'string(.//input[@name="origin"]/@value)', $form ) && '/edited' === $xpath->evaluate( 'string(.//input[@name="path"]/@value)', $form ), 'Failed edit did not retain the submitted scope.' );
+	rcs_free_assert( 0 === $xpath->query( './/input[@name="methods[]"][@checked]', $form )->length, 'Failed edit restored a method the user unchecked.' );
+	rcs_free_assert( 'https://example.com' === Remote_Content_Shortcode_Connections::all()['free-test']['origin'], 'Failed edit changed the saved connection.' );
+	rcs_free_assert( '' === $xpath->evaluate( 'string(//form[.//input[@name="alias"][@value=""]]//input[@name="origin"]/@value)' ), 'Failed edit also populated the add form.' );
+};
+$tests['retained forms exclude inline credentials and malformed values'] = static function () use ( $page ) {
+	$html = $page( 'builder', array( '_wpnonce' => wp_create_nonce( 'rcs_tools' ), 'rcs_action' => 'test', 'url' => 'https://user:inline-password@example.com/?token=private-query', 'userpwd' => 'raw:inline-password', 'body' => array( 'bad' ), 'selector' => array( 'bad' ) ) );
+	rcs_free_assert( ! str_contains( $html, 'inline-password' ) && ! str_contains( $html, 'private-query' ), 'Builder retained inline credentials.' );
+	$html = $page( 'connections', array( '_wpnonce' => wp_create_nonce( 'rcs_connections' ), 'connection_action' => 'save', 'alias' => 'raw:inline-password', 'origin' => 'https://user:inline-password@example.com/?token=private-query', 'path' => array(), 'secret' => 'private-secret' ) );
+	rcs_free_assert( ! str_contains( $html, 'inline-password' ) && ! str_contains( $html, 'private-query' ) && ! str_contains( $html, 'private-secret' ), 'Connection form retained credentials or secrets.' );
+};
+$tests['retained form fields stay bounded and use supported choices'] = static function () use ( $page, $document ) {
+	$input = array( '_wpnonce' => wp_create_nonce( 'rcs_tools' ), 'rcs_action' => 'generate', 'url' => 'https://example.com/', 'fallback' => str_repeat( 'f', 4096 ), 'body' => str_repeat( 'b', 65536 ) );
+	$xpath = $document( $page( 'builder', $input ) );
+	rcs_free_assert( $input['fallback'] === $xpath->evaluate( 'string(//input[@name="fallback"]/@value)' ) && $input['body'] === $xpath->evaluate( 'string(//textarea[@name="body"])' ), 'Bounded public fields were truncated.' );
+	$input['fallback'] .= 'f'; $input['body'] .= 'b'; $input['cache'] = 'INVALID'; $input['method'] = 'DELETE'; $input['url'] = 'http://example.com:invalid';
+	$xpath = $document( $page( 'builder', $input ) );
+	foreach ( array( 'fallback', 'url' ) as $name ) { rcs_free_assert( '' === $xpath->evaluate( 'string(//input[@name="' . $name . '"]/@value)' ), 'Oversized or malformed field was retained.' ); }
+	rcs_free_assert( '' === $xpath->evaluate( 'string(//textarea[@name="body"])' ) && 'true' === $xpath->evaluate( 'string(//select[@name="cache"]/option[@selected]/@value)' ) && 'GET' === $xpath->evaluate( 'string(//select[@name="method"]/option[@selected]/@value)' ), 'Oversized body or unsupported choice was retained.' );
+	$html = $page( 'connections', array( '_wpnonce' => wp_create_nonce( 'rcs_connections' ), 'connection_action' => 'save', 'alias' => 'public-alias', 'origin' => 'https://example.com/?token=private-query', 'auth' => 'oauth', 'methods' => array( array( 'POST' ), 'DELETE' ) ) );
+	rcs_free_assert( ! str_contains( $html, 'private-query' ), 'Invalid origin query was reflected.' );
+	$xpath = $document( $html );
+	rcs_free_assert( 'bearer' === $xpath->evaluate( 'string(//select[@name="auth"]/option[@selected]/@value)' ) && 0 === $xpath->query( '//input[@name="methods[]"][@checked]' )->length, 'Malformed authentication or methods reached the form.' );
+};
+$tests['builder allows full shortcode timeouts while diagnostics stay bounded'] = static function () use ( $page, $document ) {
+	$xpath = $document( $page( 'builder' ) );
+	rcs_free_assert( '30' === $xpath->evaluate( 'string(//input[@name="timeout"]/@max)' ), 'Builder still limits generated shortcodes to five seconds.' );
+	$seen = array(); $observe = static function ( $preempt, $args ) use ( &$seen ) { $seen[] = $args['timeout']; return new WP_Error( 'timeout-probe' ); };
+	add_filter( 'pre_http_request', $observe, PHP_INT_MAX, 2 );
+	try { Remote_Content_Shortcode_Admin::process_action( array( '_wpnonce' => wp_create_nonce( 'rcs_tools' ), 'rcs_action' => 'test', 'url' => 'http://source.rcs.test/ok', 'timeout' => '30' ) ); }
+	finally { remove_filter( 'pre_http_request', $observe, PHP_INT_MAX ); }
+	rcs_free_assert( $seen && max( $seen ) <= 5, 'Diagnostic requests exceeded five seconds.' );
+};
+$tests['connection text fields use WordPress control styling'] = static function () use ( $page, $document ) {
+	$xpath = $document( $page( 'connections' ) );
+	foreach ( $xpath->query( '//input[contains(@class,"regular-text")]' ) as $field ) { rcs_free_assert( 'text' === $field->getAttribute( 'type' ), 'Connection field omits its text input type.' ); }
+};
 $tests['usage is paginated and support copy omits content and secrets'] = static function () use ( $page ) {
 	$ids = array();
 	try {
