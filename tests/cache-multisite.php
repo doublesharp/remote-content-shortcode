@@ -11,7 +11,8 @@ try {
 	foreach ( array( $initial, $second ) as $id ) {
 		switch_to_blog( $id );
 		try {
-			Remote_Content_Shortcode_Cache::set( 'site-key', array( 'body' => 'site-' . $id, 'url' => 'https://example.com/' ), 120 );
+			$value = array( 'body' => 'site-' . $id, 'url' => 'https://example.com/' );
+			if ( ! Remote_Content_Shortcode_Cache::set( 'site-key', $value, 120 ) || $value !== Remote_Content_Shortcode_Cache::get( 'site-key' ) ) { throw new RuntimeException( 'Could not populate this site cache fixture.' ); }
 			set_transient( 'rcs_multisite_unrelated', 'preserved', 120 );
 		} finally { restore_current_blog(); }
 	}

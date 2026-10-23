@@ -103,6 +103,22 @@ $cases['a nested preempted request cannot change the outer request state'] = sta
 	} finally { remove_filter( 'pre_http_request', $intercept, 10 ); }
 	tb_assert( empty( $GLOBALS['wp_filter']['pre_http_request']->callbacks[ PHP_INT_MAX ] ), 'The outer preemption observer leaked after a nested request.' );
 };
+foreach ( array( 'pre_http_request', 'requests-requests.before_request' ) as $hook ) {
+	$cases[ 'unrelated real nested HTTP request succeeds during ' . $hook ] = static function () use ( $hook ) {
+		$control = wp_safe_remote_get( 'http://nested.rcs.test/ok' );
+		tb_assert( is_array( $control ) && str_contains( $control['body'], 'fixture success' ), 'The standalone nested-request control failed.' );
+		$nested = null;
+		$run = static function ( $url ) use ( &$nested ) {
+			if ( 'http://source.rcs.test/ok' === $url ) { $nested = wp_safe_remote_get( 'http://nested.rcs.test/ok' ); }
+		};
+		$callback = 'pre_http_request' === $hook ? static function ( $pre, $args, $url ) use ( $run ) { $run( $url ); return $pre; } : static function ( &$url ) use ( $run ) { $run( $url ); };
+		add_filter( $hook, $callback, 10, 3 );
+		try {
+			tb_assert( str_contains( tb_render(), 'fixture success' ), 'The real nested request disrupted the outer fetch.' );
+			tb_assert( is_array( $nested ) && str_contains( $nested['body'], 'fixture success' ), 'The real nested request did not complete.' );
+		} finally { remove_filter( $hook, $callback, 10 ); }
+	};
+}
 foreach ( $cases as $name => $case ) {
 	try { $case(); echo "PASS $name\n"; }
 	catch ( Throwable $error ) { ++$failures; echo "FAIL $name: " . $error->getMessage() . "\n"; }

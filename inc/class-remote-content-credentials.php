@@ -6,6 +6,12 @@ class Remote_Content_Shortcode_Credentials {
 		if ( ! is_array( $source ) || ! is_string( $source['origin'] ?? null ) || ! is_string( $url ) ) { return new WP_Error( 'unconfigured_credentials' ); }
 		$expected = wp_parse_url( $source['origin'] );
 		$actual = wp_parse_url( $url );
+		try {
+			foreach ( array( &$expected, &$actual ) as &$parts ) {
+				if ( is_array( $parts ) && ! empty( $parts['host'] ) ) { $parts['host'] = WpOrg\Requests\IdnaEncoder::encode( strtolower( $parts['host'] ) ); }
+			}
+			unset( $parts );
+		} catch ( Throwable $error ) { return new WP_Error( 'credential_origin_mismatch' ); }
 		if ( ! $expected || ! $actual || 'https' !== ( $expected['scheme'] ?? '' ) || 'https' !== ( $actual['scheme'] ?? '' ) || empty( $expected['host'] ) || empty( $actual['host'] ) || isset( $expected['user'] ) || isset( $expected['pass'] ) || isset( $actual['user'] ) || isset( $actual['pass'] ) || strtolower( $expected['host'] ) !== strtolower( $actual['host'] ) || ( $expected['port'] ?? 443 ) !== ( $actual['port'] ?? 443 ) || isset( $expected['query'] ) || isset( $expected['fragment'] ) || ! in_array( $expected['path'] ?? '', array( '', '/' ), true ) ) { return new WP_Error( 'credential_origin_mismatch' ); }
 		$path = $source['path'] ?? null;
 		$methods = $source['methods'] ?? array( 'GET' );

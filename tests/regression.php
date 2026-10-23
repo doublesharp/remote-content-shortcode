@@ -106,8 +106,19 @@ rcs_case( 'invalid XPath selector does not raise PHP warnings', function () {
 	}
 } );
 rcs_case( 'overlapping selectors cannot amplify output beyond one MiB', function () {
+	$error = null;
+	add_action( 'remote_content_shortcode_error', function ( $failure ) use ( &$error ) { $error = $failure; } );
+	$GLOBALS['rcs_response'] = str_repeat( '<div>', 26 ) . str_repeat( 'x', 40000 ) . str_repeat( '</div>', 26 );
+	$within_limit = rcs_render( array( 'selector' => 'div' ) );
+	rcs_assert( strlen( $within_limit ) > 1000000 && null === $error, 'positive control did not reach selector serialization' );
+	$GLOBALS['rcs_response'] = str_repeat( '<div>', 27 ) . str_repeat( 'x', 40000 ) . str_repeat( '</div>', 27 );
+	rcs_assert( '' === rcs_render( array( 'selector' => 'div' ) ) && 'output_too_large' === $error?->get_error_code(), 'overlapping matches did not reach the output budget' );
+} );
+rcs_case( 'deep documents fail before selector evaluation', function () {
+	$error = null;
+	add_action( 'remote_content_shortcode_error', function ( $failure ) use ( &$error ) { $error = $failure; } );
 	$GLOBALS['rcs_response'] = str_repeat( '<div>', 200 ) . str_repeat( 'x', 40000 ) . str_repeat( '</div>', 200 );
-	rcs_assert( '' === rcs_render( array( 'selector' => 'div' ) ), 'overlapping matches exceeded output budget' );
+	rcs_assert( '' === rcs_render( array( 'selector' => 'div' ) ) && 'html_too_complex' === $error?->get_error_code(), 'deep document did not reach the depth budget' );
 } );
 rcs_case( 'remove-only serialization respects the output limit', function () {
 	$GLOBALS['rcs_response'] = '<p>' . str_repeat( '&', 300000 ) . '</p>';

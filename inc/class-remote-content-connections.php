@@ -9,6 +9,7 @@ class Remote_Content_Shortcode_Connections {
 		$stored = get_option( self::OPTION, array() ); $rows = array();
 		if ( ! is_array( $stored ) ) { return $rows; }
 		foreach ( $stored as $alias => $row ) {
+			$alias = (string) $alias;
 			if ( ! self::alias_valid( $alias ) || ! is_array( $row ) || is_wp_error( self::scope( $row ) ) ) { continue; }
 			$rows[ $alias ] = $row;
 			if ( count( $rows ) >= self::LIMIT ) { break; }
@@ -31,6 +32,7 @@ class Remote_Content_Shortcode_Connections {
 	public static function definitions( $sources ) {
 		$sources = is_array( $sources ) ? $sources : array();
 		foreach ( self::stored() as $alias => $row ) {
+			$alias = (string) $alias;
 			if ( ! self::alias_valid( $alias ) || ! is_array( $row ) || isset( $sources[ $alias ] ) ) { continue; }
 			$scope = self::scope( $row );
 			if ( ! is_wp_error( $scope ) ) { $sources[ $alias ] = array( 'type' => 'connection', 'key' => $alias ) + $scope; }
@@ -46,12 +48,14 @@ class Remote_Content_Shortcode_Connections {
 		if ( ! current_user_can( 'manage_options' ) ) { return array(); }
 		$sources = apply_filters( 'remote_content_shortcode_credentials', array() ); $safe = array(); $own = self::definitions( array() );
 		if ( ! is_array( $sources ) ) { return $safe; }
+		$stored = self::stored();
 		foreach ( $sources as $alias => $source ) {
+			$alias = (string) $alias;
 			if ( ! self::alias_valid( $alias ) || ! is_array( $source ) ) { continue; }
 			$read_only = ! isset( $own[ $alias ] ) || $source !== $own[ $alias ];
 			// Code aliases expose their name only. Their option/constant names and scope may be private.
 			$safe[ $alias ] = array( 'read_only' => $read_only );
-			if ( ! $read_only ) { $safe[ $alias ] += self::scope( $source ); $safe[ $alias ]['has_secret'] = is_string( self::stored()[ $alias ]['sealed'] ?? null ) && '' !== self::stored()[ $alias ]['sealed']; }
+			if ( ! $read_only ) { $safe[ $alias ] += self::scope( $source ); $safe[ $alias ]['has_secret'] = is_string( $stored[ $alias ]['sealed'] ?? null ) && '' !== $stored[ $alias ]['sealed']; }
 		}
 		return $safe;
 	}

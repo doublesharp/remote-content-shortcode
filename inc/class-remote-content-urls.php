@@ -56,17 +56,31 @@ class Remote_Content_Shortcode_URLs {
 		} catch ( Throwable $error ) { return null; }
 	}
 	private static function srcset( $value, $base ) {
-		// Commas inside data URLs or quoted URLs are ambiguous; fail closed for the whole attribute.
+		// Keep unsupported data URLs and quoted/parenthesized forms out of this bounded parser.
 		if ( strlen( $value ) > 32768 || preg_match( '/data:|["\'()]/i', $value ) ) { return null; }
-		$candidates = explode( ',', $value );
-		if ( count( $candidates ) > 100 ) { return null; }
-		$output = array();
-		foreach ( $candidates as $candidate ) {
-			if ( ! preg_match( '/^\s*(\S+?)(?:\s+((?:[1-9][0-9]*w)|(?:(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)x)))?\s*$/D', $candidate, $match ) ) { return null; }
-			$url = self::resolve( $match[1], $base );
+		$output = array(); $position = 0; $length = strlen( $value ); $space = " \t\n\r\f";
+		while ( $position < $length ) {
+			$position += strspn( $value, $space, $position );
+			if ( $position === $length ) { break; }
+			if ( count( $output ) >= 100 || ',' === $value[ $position ] ) { return null; }
+			// HTML srcset URLs extend to whitespace. Internal commas belong to the URL.
+			$end = $position + strcspn( $value, $space, $position );
+			$reference = substr( $value, $position, $end - $position ); $position = $end; $descriptor = '';
+			if ( str_ends_with( $reference, ',' ) ) {
+				$reference = substr( $reference, 0, -1 );
+				if ( str_ends_with( $reference, ',' ) ) { return null; }
+			} else {
+				$comma = strpos( $value, ',', $position );
+				$end = false === $comma ? $length : $comma;
+				$descriptor = trim( substr( $value, $position, $end - $position ), $space );
+				if ( '' !== $descriptor && ! preg_match( '/^(?:[1-9][0-9]*w|(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)x)$/D', $descriptor ) ) { return null; }
+				$position = false === $comma ? $length : $comma + 1;
+				if ( false !== $comma && '' === trim( substr( $value, $position ), $space ) ) { return null; }
+			}
+			$url = self::resolve( $reference, $base );
 			if ( null === $url ) { return null; }
-			$output[] = $url . ( isset( $match[2] ) && '' !== $match[2] ? ' ' . $match[2] : '' );
+			$output[] = $url . ( '' !== $descriptor ? ' ' . $descriptor : '' );
 		}
-		return implode( ', ', $output );
+		return $output ? implode( ', ', $output ) : null;
 	}
 }

@@ -2,6 +2,7 @@
 """Validate the packaged plugin in disposable Docker services with short deadlines."""
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import secrets
 import shutil
@@ -82,6 +83,10 @@ def check(name, arguments, timeout=30, environment=None, isolated=True):
                    'render-contexts', 'proxy-transport', 'cache-write', 'cache-read',
                    'cache-uninstall', 'regex-budget', 'cache-multisite', 'extension-api', 'free-admin'})
     covered = (name.startswith('pro-') and name != 'pro-lint') if PRO_COVERAGE else covered
+    # Instrumentation and Docker lifecycle share this watchdog. Selector tests
+    # still enforce their separate two-second budget for the actual work.
+    if COVERAGE and covered:
+        timeout = max(timeout, 15)
     if arguments[0] == 'php':
         fault = name.endswith('dependency-failures') or name == 'free-platform-failures' or name.startswith('startup-')
         # uopz changes compiler indices, so coverage and opcode capture use one mode.
@@ -108,6 +113,19 @@ def check(name, arguments, timeout=30, environment=None, isolated=True):
 
 def wp(name, arguments, **options):
     check(name, ['php', '-d', 'memory_limit=256M', '/usr/local/bin/wp', '--allow-root', '--path=/wordpress', *arguments], **options)
+
+
+def download_wordpress():
+    # Keep WP-CLI's checksum verification while extracting locally instead of
+    # copying thousands of individual files through a Docker bind mount.
+    wp('download-wordpress', ['core', 'download', '--version=' + WORDPRESS, '--no-extract'],
+       isolated=False, timeout=60)
+    archives = list(WP.glob('*.tar.gz'))
+    if len(archives) != 1:
+        raise RuntimeError('Expected one verified WordPress archive.')
+    archive = archives[0]
+    command(['tar', '-xf', str(archive), '--strip-components=1', '-C', str(WP)], timeout=30)
+    archive.unlink()
 
 
 def terminate(signum, frame):
@@ -147,7 +165,7 @@ try:
         release.extractall(WORK / 'release')
     print(f'PASS release ZIP has {len(names)} allowed files', flush=True)
     check('php-lint', ['sh', '-ec', 'find /work/release -name "*.php" -print0 | xargs -0 -n 1 php -l'], isolated=False)
-    wp('download-wordpress', ['core', 'download', '--version=' + WORDPRESS], isolated=False, timeout=60)
+    download_wordpress()
     check('download-plugin-check', ['php', '-r',
           '$body = file_get_contents("https://downloads.wordpress.org/plugin/plugin-check.latest-stable.zip"); if (false === $body) { exit(1); } if (false === file_put_contents("/work/plugin-check.zip", $body)) { exit(1); }'], isolated=False, timeout=45)
     check('download-legacy-plugin', ['php', '-r',
@@ -188,7 +206,11 @@ try:
     wp('upgrade-verify', ['eval-file', '/source/tests/upgrade-from-1.5.php'])
     wp('cve-regression', ['eval-file', '/source/tests/cve-regression.php'])
     wp('encoded-fallback', ['eval-file', '/source/tests/encoded-fallback.php'])
-    wp('install-plugin-check', ['plugin', 'install', '/work/plugin-check.zip', '--activate'])
+    # Plugin Check is a test dependency. Extract it locally to avoid thousands of
+    # small writes through a Docker bind mount during WordPress's ZIP upgrader.
+    with zipfile.ZipFile(WORK / 'plugin-check.zip') as plugin_check:
+        plugin_check.extractall(WP / 'wp-content/plugins')
+    wp('install-plugin-check', ['plugin', 'activate', 'plugin-check'])
     for suite in ('regression', 'integration-transport', 'features-integration', 'content-auth-features',
                   'cache-features', 'admin-block-features', 'transport', 'content-boundaries',
                   'admin-cache-boundaries', 'renderer-boundaries', 'transport-boundaries',
@@ -203,6 +225,16 @@ try:
     for phase in ('write', 'read', 'uninstall'):
         wp('cache-' + phase, ['eval-file', '/source/tests/cache-features.php'], environment={'RCS_CACHE_PHASE': phase})
     wp('uninstall-boundaries', ['eval-file', '/source/tests/uninstall-boundaries.php'])
+    wp('cache-concurrency-prepare', ['eval-file', '/source/tests/cache-concurrency.php'],
+       environment={'RCS_CACHE_CONCURRENCY': 'prepare'})
+    with ThreadPoolExecutor(max_workers=4) as writers:
+        jobs = [writers.submit(wp, 'cache-concurrency-writer-' + str(writer),
+                               ['eval-file', '/source/tests/cache-concurrency.php'],
+                               environment={'RCS_CACHE_CONCURRENCY': str(writer)})
+                for writer in range(4)]
+        for job in jobs:
+            job.result()
+    wp('cache-concurrency-verify', ['eval-file', '/source/tests/cache-concurrency.php'])
     check('selector-autoload', ['php', '/source/tests/selector-autoload.php'], timeout=5)
     if FAULT_TESTS:
         for case in ('direct-main', 'direct-html', 'direct-regex', 'missing-dom', 'missing-curl', 'missing-connect-option'):

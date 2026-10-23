@@ -5,6 +5,14 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 function rcs_ac_assert( $ok, $message ) {
 	if ( ! $ok ) { throw new RuntimeException( $message ); }
 }
+/** Corrupt a registered payload without accidentally testing an unindexed miss. */
+function rcs_ac_write_payload( $key, $entry ) {
+	rcs_ac_assert( Remote_Content_Shortcode_Cache::set( $key, array( 'body' => 'fixture', 'url' => 'https://example.com/' ), 120 ), 'Could not register cache fixture.' );
+	$id = 'rcs_v2_' . hash( 'sha256', $key );
+	$stored = wp_using_ext_object_cache() ? wp_cache_get( $id, Remote_Content_Shortcode_Cache::GROUP ) : get_transient( $id );
+	if ( is_array( $entry ) && isset( $stored['token'] ) ) { $entry['token'] = $stored['token']; }
+	if ( wp_using_ext_object_cache() ) { wp_cache_set( $id, $entry, Remote_Content_Shortcode_Cache::GROUP, 120 ); } else { set_transient( $id, $entry, 120 ); }
+}
 class RCS_Admin_Boundary_Die extends RuntimeException {}
 
 $tests = array();
@@ -144,7 +152,7 @@ $tests['repeated negative writes preserve a still-eligible last good payload'] =
 	$id = 'rcs_v2_' . hash( 'sha256', 'repeat-negative' );
 	$good = array( 'body' => 'last success', 'url' => 'https://example.com/' );
 	$entry = array( 'value' => $good, 'fresh_until' => time() - 1, 'stale_until' => time() + 120 );
-	if ( wp_using_ext_object_cache() ) { wp_cache_set( $id, $entry, Remote_Content_Shortcode_Cache::GROUP, 120 ); } else { set_transient( $id, $entry, 120 ); }
+	rcs_ac_write_payload( 'repeat-negative', $entry );
 	for ( $i = 0; $i < 2; ++$i ) {
 		rcs_ac_assert( Remote_Content_Shortcode_Cache::set( 'repeat-negative', new WP_Error( 'outage' ), 60 ), 'Negative cache write failed.' );
 		rcs_ac_assert( is_wp_error( Remote_Content_Shortcode_Cache::get( 'repeat-negative' ) ) && $good === Remote_Content_Shortcode_Cache::get( 'repeat-negative', true ), 'Repeated negative cache lost last good content.' );
@@ -154,7 +162,7 @@ $tests['corrupt payloads and scalar indexes recover through public storage APIs'
 	$id = 'rcs_v2_' . hash( 'sha256', 'corrupt' );
 	try {
 		foreach ( array( 'corrupt', array(), array( 'fresh_until' => time() + 60 ), array( 'stale_until' => time() + 60 ) ) as $invalid ) {
-			if ( wp_using_ext_object_cache() ) { wp_cache_set( $id, $invalid, Remote_Content_Shortcode_Cache::GROUP, 60 ); } else { set_transient( $id, $invalid, 60 ); }
+			rcs_ac_write_payload( 'corrupt', $invalid );
 			rcs_ac_assert( false === Remote_Content_Shortcode_Cache::get( 'corrupt' ) && false === Remote_Content_Shortcode_Cache::get( 'corrupt', true ), 'Corrupt payload was served.' );
 		}
 		update_option( Remote_Content_Shortcode_Cache::INDEX, 'corrupt-index', false );
@@ -162,11 +170,35 @@ $tests['corrupt payloads and scalar indexes recover through public storage APIs'
 		rcs_ac_assert( is_array( get_option( Remote_Content_Shortcode_Cache::INDEX ) ), 'Recovered index is not an array.' );
 	} finally { if ( wp_using_ext_object_cache() ) { wp_cache_delete( $id, Remote_Content_Shortcode_Cache::GROUP ); } else { delete_transient( $id ); } }
 };
+$tests['complete but corrupt cache envelopes are misses without warnings'] = static function () {
+	$key = 'corrupt-envelope'; $id = 'rcs_v2_' . hash( 'sha256', $key );
+	$valid = array( 'value' => array( 'body' => 'cached', 'url' => 'https://example.com/' ), 'fresh_until' => time() + 60, 'stale_until' => time() + 120 );
+	$corrupt = array();
+	foreach ( array( 'fresh_until', 'stale_until' ) as $field ) {
+		foreach ( array( 'never', array(), (string) ( time() + 60 ) ) as $timestamp ) { $corrupt[] = array_replace( $valid, array( $field => $timestamp ) ); }
+	}
+	foreach ( array( 'body', array(), array( 'body' => array(), 'url' => 'https://example.com/' ), array( 'body' => 'text', 'url' => false ) ) as $value ) { $corrupt[] = array_replace( $valid, array( 'value' => $value ) ); }
+	set_error_handler( static function ( $severity, $message, $file, $line ) { throw new ErrorException( $message, 0, $severity, $file, $line ); } );
+	try {
+		foreach ( $corrupt as $entry ) {
+			rcs_ac_write_payload( $key, $entry );
+			rcs_ac_assert( false === Remote_Content_Shortcode_Cache::get( $key ) && false === Remote_Content_Shortcode_Cache::get( $key, true ), 'A complete corrupt envelope was accepted as cached content.' );
+			rcs_ac_assert( Remote_Content_Shortcode_Cache::set( $key, new WP_Error( 'outage' ), 60 ), 'Could not replace corrupt cache content.' );
+			rcs_ac_assert( false === Remote_Content_Shortcode_Cache::get( $key, true ), 'Negative caching preserved corrupt stale content.' );
+		}
+		$entry = array_replace( $valid, array( 'value' => new WP_Error( 'outage' ), 'good' => 'corrupt-stale-content' ) );
+		rcs_ac_write_payload( $key, $entry );
+		rcs_ac_assert( false === Remote_Content_Shortcode_Cache::get( $key, true ), 'Malformed last-good content was served as stale.' );
+	} finally {
+		restore_error_handler();
+		if ( wp_using_ext_object_cache() ) { wp_cache_delete( $id, Remote_Content_Shortcode_Cache::GROUP ); } else { delete_transient( $id ); }
+	}
+};
 foreach ( array( 'fresh' => false, 'stale' => true ) as $mode => $allow_stale ) {
 $tests["timestamped payloads missing their value are safe $mode cache misses"] = static function () use ( $allow_stale ) {
 	$id = 'rcs_v2_' . hash( 'sha256', 'missing-value' );
 	$entry = array( 'fresh_until' => time() + 60, 'stale_until' => time() + 120 );
-	if ( wp_using_ext_object_cache() ) { wp_cache_set( $id, $entry, Remote_Content_Shortcode_Cache::GROUP, 120 ); } else { set_transient( $id, $entry, 120 ); }
+	rcs_ac_write_payload( 'missing-value', $entry );
 	set_error_handler( static function ( $severity, $message, $file, $line ) { throw new ErrorException( $message, 0, $severity, $file, $line ); } );
 	try {
 		rcs_ac_assert( false === Remote_Content_Shortcode_Cache::get( 'missing-value', $allow_stale ), 'Missing payload value was not rejected.' );
@@ -179,7 +211,7 @@ $tests["timestamped payloads missing their value are safe $mode cache misses"] =
 foreach ( array( 'stale timestamp' => array( 'value' => 'malformed' ), 'payload value' => array( 'fresh_until' => time() + 60, 'stale_until' => time() + 120 ) ) as $missing => $old_entry ) {
 $tests["negative writes recover from a previous entry missing $missing"] = static function () use ( $old_entry ) {
 	$id = 'rcs_v2_' . hash( 'sha256', 'missing-stale' );
-	if ( wp_using_ext_object_cache() ) { wp_cache_set( $id, $old_entry, Remote_Content_Shortcode_Cache::GROUP, 120 ); } else { set_transient( $id, $old_entry, 120 ); }
+	rcs_ac_write_payload( 'missing-stale', $old_entry );
 	set_error_handler( static function ( $severity, $message, $file, $line ) { throw new ErrorException( $message, 0, $severity, $file, $line ); } );
 	try {
 		rcs_ac_assert( Remote_Content_Shortcode_Cache::set( 'missing-stale', new WP_Error( 'network' ), 60 ), 'Malformed previous payload blocked a negative write.' );
@@ -308,7 +340,7 @@ foreach ( array( 'set', 'clear', 'payload' ) as $operation ) {
 $tests['negative cache entries are never returned as stale successful content'] = static function () {
 	$id = 'rcs_v2_' . hash( 'sha256', 'stale-negative' );
 	$entry = array( 'value' => new WP_Error( 'previous-outage' ), 'fresh_until' => time() - 1, 'stale_until' => time() + 120 );
-	set_transient( $id, $entry, 120 );
+	rcs_ac_write_payload( 'stale-negative', $entry );
 	try {
 		rcs_ac_assert( false === Remote_Content_Shortcode_Cache::get( 'stale-negative', true ), 'An error object was served as stale content.' );
 		rcs_ac_assert( Remote_Content_Shortcode_Cache::set( 'stale-negative', new WP_Error( 'new-outage' ), 60, 120 ), 'Replacing an old error failed.' );
@@ -347,6 +379,57 @@ $tests['object cache API stores reads and removes plugin entries'] = static func
 	} finally { Remote_Content_Shortcode_Cache::clear(); wp_using_ext_object_cache( $previous ); }
 };
 
+$tests['legacy indexed payloads remain usable until explicitly cleared'] = static function () {
+	$key = 'legacy-envelope'; $id = 'rcs_v2_' . hash( 'sha256', $key );
+	$value = array( 'body' => 'legacy response', 'url' => 'https://example.com/' );
+	rcs_ac_assert( Remote_Content_Shortcode_Cache::set( $key, $value, 120 ), 'Could not seed the legacy cache fixture.' );
+	$entry = wp_using_ext_object_cache() ? wp_cache_get( $id, Remote_Content_Shortcode_Cache::GROUP ) : get_transient( $id );
+	$index = get_option( Remote_Content_Shortcode_Cache::INDEX );
+	unset( $entry['token'], $index[ $id ]['token'] );
+	update_option( Remote_Content_Shortcode_Cache::INDEX, $index, false );
+	if ( wp_using_ext_object_cache() ) { wp_cache_set( $id, $entry, Remote_Content_Shortcode_Cache::GROUP, 120 ); } else { set_transient( $id, $entry, 120 ); }
+	rcs_ac_assert( $value === Remote_Content_Shortcode_Cache::get( $key ), 'A valid legacy envelope was rejected.' );
+	rcs_ac_assert( 1 === Remote_Content_Shortcode_Cache::delete( $key ) && false === Remote_Content_Shortcode_Cache::get( $key ), 'A legacy envelope survived explicit deletion.' );
+};
+$tests['clearing stays effective when the active cache backend changes'] = static function () {
+	$previous = wp_using_ext_object_cache();
+	try {
+		foreach ( array( false, true ) as $external ) {
+			wp_using_ext_object_cache( $external );
+			$value = array( 'body' => 'before clear', 'url' => 'https://example.com/' );
+			rcs_ac_assert( Remote_Content_Shortcode_Cache::set( 'backend-switch', $value, 120, 0, 'backend-switch' ) && $value === Remote_Content_Shortcode_Cache::get( 'backend-switch' ), 'Could not populate the initial backend.' );
+			wp_using_ext_object_cache( ! $external );
+			rcs_ac_assert( 1 === Remote_Content_Shortcode_Cache::clear( 'backend-switch' ), 'Cross-backend clearing lost the indexed entry.' );
+			wp_using_ext_object_cache( $external );
+			rcs_ac_assert( false === Remote_Content_Shortcode_Cache::get( 'backend-switch' ), 'A cleared response reappeared after switching backends.' );
+		}
+	} finally { Remote_Content_Shortcode_Cache::clear(); wp_using_ext_object_cache( $previous ); }
+};
+$tests['an unavailable object cache cannot resurrect a cleared or replaced response'] = static function () {
+	global $wp_object_cache;
+	$original = $wp_object_cache; $previous = wp_using_ext_object_cache();
+	$key = 'unavailable-backend'; $id = 'rcs_v2_' . hash( 'sha256', $key );
+	try {
+		wp_using_ext_object_cache( true );
+		$old = array( 'body' => 'old response', 'url' => 'https://example.com/' );
+		rcs_ac_assert( Remote_Content_Shortcode_Cache::set( $key, $old, 120, 0, $key ) && $old === Remote_Content_Shortcode_Cache::get( $key ), 'Could not prepare the external backend.' );
+		// Disconnect the old cache entirely, including its cached options.
+		$offline = new WP_Object_Cache(); $wp_object_cache = $offline; wp_using_ext_object_cache( false );
+		rcs_ac_assert( 1 === Remote_Content_Shortcode_Cache::clear( $key ), 'Could not invalidate an unavailable backend.' );
+		$wp_object_cache = $original; wp_using_ext_object_cache( true );
+		rcs_ac_assert( false === Remote_Content_Shortcode_Cache::get( $key ), 'An unavailable backend resurrected cleared content.' );
+		$wp_object_cache = $offline; wp_using_ext_object_cache( false );
+		$new = array( 'body' => 'new response', 'url' => 'https://example.com/' );
+		rcs_ac_assert( Remote_Content_Shortcode_Cache::set( $key, $new, 120, 0, $key ) && $new === Remote_Content_Shortcode_Cache::get( $key ), 'Could not register the replacement response.' );
+		$wp_object_cache = $original; wp_using_ext_object_cache( true );
+		rcs_ac_assert( false === Remote_Content_Shortcode_Cache::get( $key ), 'An old payload matched the replacement index entry.' );
+	} finally {
+		$wp_object_cache = $original;
+		wp_cache_delete( $id, Remote_Content_Shortcode_Cache::GROUP );
+		wp_using_ext_object_cache( false ); Remote_Content_Shortcode_Cache::clear();
+		wp_using_ext_object_cache( $previous );
+	}
+};
 $old_user = get_current_user_id();
 $failures = 0;
 try {

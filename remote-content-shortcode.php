@@ -464,6 +464,10 @@ if ( ! class_exists( 'RemoteContentShortcode' ) ) {
 				}
 			};
 			$prepare = static function ( &$request_url, &$headers, &$data, &$type, &$options ) use ( $url, $args, $capture, $reject_encoding, $check_peer, &$prepared ) {
+				// WordPress's bridge retains the original URL even if another hook mutates
+				// request_url. Use that context to leave unrelated nested requests alone.
+				$hooks = $options['hooks'] ?? null;
+				if ( $hooks instanceof WP_HTTP_Requests_Hooks && ( new ReflectionProperty( WP_HTTP_Requests_Hooks::class, 'url' ) )->getValue( $hooks ) !== $url ) { return; }
 				if ( $request_url !== $url || $type !== $args['method'] ) {
 					throw new WpOrg\Requests\Exception( 'Request URL or method changed.', 'remote_content_request_changed' );
 				}

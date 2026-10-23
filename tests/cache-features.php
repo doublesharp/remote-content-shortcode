@@ -9,7 +9,7 @@ function rcs_cache_assert( $ok, $message ) { if ( ! $ok ) { throw new RuntimeExc
 function rcs_cache_value( $body ) { return array( 'body' => $body, 'url' => 'https://example.com/final' ); }
 $phase = getenv( 'RCS_CACHE_PHASE' );
 if ( 'uninstall' === $phase ) {
-	Remote_Content_Shortcode_Cache::set( 'uninstall-test', rcs_cache_value( 'remove me' ), 120 );
+	rcs_cache_assert( Remote_Content_Shortcode_Cache::set( 'uninstall-test', rcs_cache_value( 'remove me' ), 120 ) && rcs_cache_value( 'remove me' ) === Remote_Content_Shortcode_Cache::get( 'uninstall-test' ), 'Could not populate the uninstall cache fixture.' );
 	set_transient( 'rcs_uninstall_unrelated', 'preserved', 120 );
 	$uninstall = $plugin_root . '/uninstall.php';
 	rcs_cache_assert( file_exists( $uninstall ), 'Cache uninstall cleanup is missing.' );
@@ -24,7 +24,7 @@ if ( 'uninstall' === $phase ) {
 }
 if ( 'write' === $phase ) {
 	Remote_Content_Shortcode_Cache::clear();
-	Remote_Content_Shortcode_Cache::set( 'cross-request', rcs_cache_value( 'persisted' ), 120, 0, 'persist' );
+	rcs_cache_assert( Remote_Content_Shortcode_Cache::set( 'cross-request', rcs_cache_value( 'persisted' ), 120, 0, 'persist' ), 'Cross-request cache write failed.' );
 	echo "PASS wrote cross-request cache\n";
 	return;
 }

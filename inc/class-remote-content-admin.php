@@ -144,6 +144,7 @@ class Remote_Content_Shortcode_Admin {
 		echo '<h2>' . esc_html__( 'Connections', 'remote-content-shortcode' ) . '</h2><p>' . esc_html__( 'Credentials apply only to the exact HTTPS origin, path and methods below. Saved secrets are encrypted with the WordPress salts. Back up those salts before changing them.', 'remote-content-shortcode' ) . '</p>';
 		$all = Remote_Content_Shortcode_Connections::all();
 		foreach ( $all as $alias => $row ) {
+			$alias = (string) $alias;
 			if ( $row['read_only'] ) { echo '<p><code>' . esc_html( $alias ) . '</code> ' . esc_html__( 'Configured in PHP, read only.', 'remote-content-shortcode' ) . '</p>'; }
 			else { self::connection_form( $alias, $row, $alias === ( $input['alias'] ?? null ) ? $input : array() ); }
 		}

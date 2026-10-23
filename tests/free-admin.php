@@ -33,6 +33,35 @@ $tests['connections retain replace and delete encrypted secrets'] = static funct
 	$data['delete_secret'] = '1'; rcs_free_assert( 'free-test' === Remote_Content_Shortcode_Connections::save( $data ) && is_wp_error( Remote_Content_Shortcode_Connections::secret( 'free-test' ) ), 'Explicit secret removal failed.' );
 	$_REQUEST['_wpnonce'] = wp_create_nonce( 'rcs_connections' ); rcs_free_assert( true === Remote_Content_Shortcode_Connections::delete( 'free-test' ) && true === Remote_Content_Shortcode_Connections::delete( 'free-test' ), 'Delete is not idempotent.' );
 };
+$tests['numeric aliases survive storage and remain usable credentials'] = static function () use ( $fixture ) {
+	foreach ( array( '0', '123', '-123', '00123' ) as $alias ) {
+		$data = $fixture( $alias );
+		rcs_free_assert( $alias === Remote_Content_Shortcode_Connections::save( $data ), 'Numeric alias could not be saved.' );
+		$sources = apply_filters( 'remote_content_shortcode_credentials', array() );
+		rcs_free_assert( $alias === ( $sources[ $alias ]['key'] ?? null ), 'Numeric alias disappeared or its credential key changed type.' );
+		rcs_free_assert( array( 'Authorization' => 'Bearer test-secret-unique' ) === Remote_Content_Shortcode_Credentials::headers( $sources[ $alias ], 'https://example.com/endpoint', 'GET' ), 'Stored numeric alias could not authenticate.' );
+		$all = Remote_Content_Shortcode_Connections::all();
+		rcs_free_assert( isset( $all[ $alias ] ) && false === $all[ $alias ]['read_only'] && true === $all[ $alias ]['has_secret'], 'Numeric connection was hidden from administrators.' );
+		$data['secret'] = '';
+		rcs_free_assert( $alias === Remote_Content_Shortcode_Connections::save( $data ) && 'test-secret-unique' === Remote_Content_Shortcode_Connections::secret( $alias ), 'Editing a numeric alias lost its saved secret.' );
+		$_REQUEST['_wpnonce'] = wp_create_nonce( 'rcs_connections' );
+		rcs_free_assert( true === Remote_Content_Shortcode_Connections::delete( $alias ) && ! isset( Remote_Content_Shortcode_Connections::all()[ $alias ] ), 'Numeric alias could not be deleted.' );
+	}
+};
+$tests['connection listing reads its inventory a constant number of times'] = static function () use ( $fixture ) {
+	rcs_free_assert( 'inventory' === Remote_Content_Shortcode_Connections::save( $fixture( 'inventory' ) ), 'Could not create inventory fixture.' );
+	$row = get_option( Remote_Content_Shortcode_Connections::OPTION )['inventory'];
+	$rows = array();
+	for ( $i = 0; $i < Remote_Content_Shortcode_Connections::LIMIT; ++$i ) { $rows[ 'inventory-' . $i ] = $row; }
+	update_option( Remote_Content_Shortcode_Connections::OPTION, $rows, false );
+	$reads = 0;
+	$observe = static function ( $value ) use ( &$reads ) { ++$reads; return $value; };
+	add_filter( 'option_' . Remote_Content_Shortcode_Connections::OPTION, $observe );
+	try { $all = Remote_Content_Shortcode_Connections::all(); }
+	finally { remove_filter( 'option_' . Remote_Content_Shortcode_Connections::OPTION, $observe ); }
+	rcs_free_assert( count( $rows ) === count( $all ) && true === $all['inventory-0']['has_secret'], 'Listing lost connection metadata.' );
+	rcs_free_assert( $reads <= 3, 'Listing repeatedly loaded and validated the full inventory: ' . $reads . ' reads.' );
+};
 $tests['connections reject malformed scopes and reserved headers'] = static function () use ( $fixture ) {
 	foreach ( array( 'alias' => array( '', 'bad alias', str_repeat( 'a', 65 ), array() ), 'auth' => array( 'oauth', array() ), 'origin' => array( 'http://example.com', 'https://user:pass@example.com', 'https://example.com/a', 'https://example.com?key=secret' ), 'path' => array( '', 'endpoint', '/a?b', '/a\\b', '/a/../b', '/%2e%2e/b', '/a b' ), 'methods' => array( array(), array( 'DELETE' ), array( array( 'GET' ) ), array( new stdClass() ), 'GET' ), 'secret' => array( "bad\nvalue", str_repeat( 'a', 8193 ), array() ) ) as $field => $values ) {
 		foreach ( $values as $value ) { $data = $fixture(); $data[ $field ] = $value; rcs_free_assert( is_wp_error( Remote_Content_Shortcode_Connections::save( $data ) ), "Invalid $field accepted." ); }
@@ -41,12 +70,14 @@ $tests['connections reject malformed scopes and reserved headers'] = static func
 	foreach ( array( 'basic' => 'user:password', 'bearer' => 'token', 'api_key' => 'value' ) as $auth => $secret ) { $data = $fixture(); $data['auth'] = $auth; $data['secret'] = $secret; rcs_free_assert( 'free-test' === Remote_Content_Shortcode_Connections::save( $data ), 'Supported authentication rejected.' ); }
 };
 $tests['code aliases win and are read only'] = static function () use ( $fixture ) {
-	$code = static function ( $sources ) { $sources['configured'] = array( 'type' => 'constant', 'key' => 'CODE_KEY', 'origin' => 'https://example.com', 'path' => '/endpoint', 'methods' => array( 'GET' ) ); return $sources; };
+	$code = static function ( $sources ) { $source = array( 'type' => 'constant', 'key' => 'CODE_KEY', 'origin' => 'https://example.com', 'path' => '/endpoint', 'methods' => array( 'GET' ) ); $sources['configured'] = $source; $sources['123'] = $source; return $sources; };
 	add_filter( 'remote_content_shortcode_credentials', $code, 10 );
 	try {
-		rcs_free_assert( is_wp_error( Remote_Content_Shortcode_Connections::save( $fixture( 'configured' ) ) ), 'Code alias overwritten.' );
-		$_REQUEST['_wpnonce'] = wp_create_nonce( 'rcs_connections' ); rcs_free_assert( is_wp_error( Remote_Content_Shortcode_Connections::delete( 'configured' ) ), 'Code alias deleted.' );
-		$all = Remote_Content_Shortcode_Connections::all(); rcs_free_assert( ! empty( $all['configured']['read_only'] ) && ! isset( $all['configured']['key'] ), 'Code metadata unsafe.' );
+		foreach ( array( 'configured', '123' ) as $alias ) {
+			rcs_free_assert( is_wp_error( Remote_Content_Shortcode_Connections::save( $fixture( $alias ) ) ), 'Code alias overwritten.' );
+			$_REQUEST['_wpnonce'] = wp_create_nonce( 'rcs_connections' ); rcs_free_assert( is_wp_error( Remote_Content_Shortcode_Connections::delete( $alias ) ), 'Code alias deleted.' );
+			$all = Remote_Content_Shortcode_Connections::all(); rcs_free_assert( array( 'read_only' => true ) === ( $all[ $alias ] ?? null ), 'Code metadata unsafe or a numeric code alias was hidden.' );
+		}
 	} finally { remove_filter( 'remote_content_shortcode_credentials', $code, 10 ); }
 };
 $tests['connections have a bounded inventory and emit scoped definitions'] = static function () use ( $fixture ) {
@@ -131,6 +162,18 @@ $tests['failed connection edits retain only the submitted form'] = static functi
 	rcs_free_assert( 'https://example.com' === Remote_Content_Shortcode_Connections::all()['free-test']['origin'], 'Failed edit changed the saved connection.' );
 	rcs_free_assert( '' === $xpath->evaluate( 'string(//form[.//input[@name="alias"][@value=""]]//input[@name="origin"]/@value)' ), 'Failed edit also populated the add form.' );
 };
+$tests['numeric connection edits retain public values in their own form'] = static function () use ( $page, $document, $fixture ) {
+	$input = $fixture( '123' );
+	rcs_free_assert( '123' === Remote_Content_Shortcode_Connections::save( $input ), 'Could not prepare numeric connection.' );
+	$before = $document( $page( 'connections' ) );
+	rcs_free_assert( 1 === $before->query( '//input[@name="alias"][@value="123"][@readonly]' )->length, 'Saved numeric alias was not rendered as an existing connection.' );
+	$input['connection_action'] = 'save'; $input['origin'] = 'http://edited.example.com'; $input['secret'] = '';
+	$xpath = $document( $page( 'connections', $input ) );
+	$form = $xpath->query( '//form[.//input[@name="alias"][@value="123"]]' )->item( 0 );
+	rcs_free_assert( $form instanceof DOMElement && 'http://edited.example.com' === $xpath->evaluate( 'string(.//input[@name="origin"]/@value)', $form ), 'Numeric alias edit lost the submitted origin.' );
+	$add_form = $xpath->query( '//form[.//input[@name="alias"][@value=""]]' );
+	rcs_free_assert( 1 === $add_form->length && '' === $xpath->evaluate( 'string(.//input[@name="origin"]/@value)', $add_form->item( 0 ) ), 'Numeric alias edit populated or removed the add form.' );
+};
 $tests['retained forms exclude inline credentials and malformed values'] = static function () use ( $page ) {
 	$html = $page( 'builder', array( '_wpnonce' => wp_create_nonce( 'rcs_tools' ), 'rcs_action' => 'test', 'url' => 'https://user:inline-password@example.com/?token=private-query', 'userpwd' => 'raw:inline-password', 'body' => array( 'bad' ), 'selector' => array( 'bad' ) ) );
 	rcs_free_assert( ! str_contains( $html, 'inline-password' ) && ! str_contains( $html, 'private-query' ), 'Builder retained inline credentials.' );
@@ -161,7 +204,9 @@ $tests['builder allows full shortcode timeouts while diagnostics stay bounded'] 
 };
 $tests['connection text fields use WordPress control styling'] = static function () use ( $page, $document ) {
 	$xpath = $document( $page( 'connections' ) );
-	foreach ( $xpath->query( '//input[contains(@class,"regular-text")]' ) as $field ) { rcs_free_assert( 'text' === $field->getAttribute( 'type' ), 'Connection field omits its text input type.' ); }
+	$fields = $xpath->query( '//input[contains(@class,"regular-text")]' );
+	rcs_free_assert( 4 === $fields->length, 'Connection form omitted its public text fields.' );
+	foreach ( $fields as $field ) { rcs_free_assert( 'text' === $field->getAttribute( 'type' ), 'Connection field omits its text input type.' ); }
 };
 $tests['usage is paginated and support copy omits content and secrets'] = static function () use ( $page ) {
 	$ids = array();

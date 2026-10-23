@@ -34,6 +34,8 @@ $cb_cases['credentials reject non-string destination'] = function () {
 foreach ( array(
 	'malformed origin' => array( array( 'origin' => 'https://example.com:invalid' ), 'https://example.com/content' ),
 	'malformed destination' => array( array(), 'https://example.com:invalid' ),
+	'overlong origin hostname' => array( array( 'origin' => 'https://' . str_repeat( 'a', 64 ) . '.example.com' ), 'https://example.com/content' ),
+	'overlong destination hostname' => array( array(), 'https://' . str_repeat( 'a', 64 ) . '.example.com/content' ),
 	'origin scheme' => array( array( 'origin' => 'http://example.com' ), 'https://example.com/content' ),
 	'destination scheme' => array( array(), 'http://example.com/content' ),
 	'origin scheme missing' => array( array( 'origin' => '//example.com' ), 'https://example.com/content' ),
@@ -154,7 +156,7 @@ $cb_cases['URL length includes the resolved base directory'] = function () {
 	$absolute = 'https://example.com/' . str_repeat( 'd', 8171 ) . '/';
 	cb_check( str_contains( cb_attribute( 'href', $absolute ), 'href="' . $absolute . '"' ), '8192-byte URL rejected' );
 };
-foreach ( array( 'too long' => str_repeat( 'x', 32769 ), 'data' => 'data:image/png;base64,AAAA 1x', 'quote' => '"a.png" 1x', 'parenthesis' => 'a(b).png 1x', 'too many candidates' => implode( ',', array_fill( 0, 101, 'x' ) ), 'empty candidate' => 'a.png 1x,', 'zero width' => 'a.png 0w', 'bad descriptor' => 'a.png 2q', 'multiple descriptors' => 'a.png 1x 2x', 'unsafe scheme' => 'javascript:alert 1x', 'unsafe second candidate' => 'a.png 1x, ftp://example.com/a 2x' ) as $label => $value ) {
+foreach ( array( 'too long' => str_repeat( 'x', 32769 ), 'data' => 'data:image/png;base64,AAAA 1x', 'quote' => '"a.png" 1x', 'parenthesis' => 'a(b).png 1x', 'too many candidates' => implode( ', ', array_fill( 0, 101, 'x' ) ), 'empty candidate' => 'a.png 1x,', 'zero width' => 'a.png 0w', 'bad descriptor' => 'a.png 2q', 'multiple descriptors' => 'a.png 1x 2x', 'unsafe scheme' => 'javascript:alert 1x', 'unsafe second candidate' => 'a.png 1x, ftp://example.com/a 2x' ) as $label => $value ) {
 	$cb_cases[ 'URL srcset: ' . $label ] = function () use ( $value, $label ) {
 		cb_check( '<a>link</a>' === cb_attribute( 'srcset', $value ), 'Unsafe srcset survived: ' . $label );
 	};
@@ -162,8 +164,19 @@ foreach ( array( 'too long' => str_repeat( 'x', 32769 ), 'data' => 'data:image/p
 $cb_cases['URL srcset supports descriptorless width and fractional density candidates'] = function () {
 	$out = cb_attribute( 'srcset', 'plain.png, small.png 1w, medium.png .5x, large.png 1.5x' );
 	cb_check( '<a srcset="https://example.com/dir/plain.png, https://example.com/dir/small.png 1w, https://example.com/dir/medium.png .5x, https://example.com/dir/large.png 1.5x">link</a>' === $out, 'Valid srcset changed' );
-	$out = cb_attribute( 'srcset', implode( ',', array_fill( 0, 100, 'x' ) ) );
+	$out = cb_attribute( 'srcset', implode( ', ', array_fill( 0, 100, 'x' ) ) );
 	cb_check( is_string( $out ) && 100 === substr_count( $out, 'https://example.com/dir/x' ), '100 candidates rejected' );
+};
+$cb_cases['URL srcset preserves commas inside CDN paths and query strings'] = function () {
+	foreach ( array(
+		'https://cdn.example.com/w_100,h_100/photo.jpg 1x, large.jpg 2x' => 'https://cdn.example.com/w_100,h_100/photo.jpg 1x, https://example.com/dir/large.jpg 2x',
+		'small.jpg?crop=10,20 1x, large.jpg?crop=30,40 2x' => 'https://example.com/dir/small.jpg?crop=10,20 1x, https://example.com/dir/large.jpg?crop=30,40 2x',
+		'one,two.jpg, large.jpg 2x' => 'https://example.com/dir/one,two.jpg, https://example.com/dir/large.jpg 2x',
+		"one.png, \n" => 'https://example.com/dir/one.png',
+	) as $input => $expected ) {
+		cb_check( '<a srcset="' . $expected . '">link</a>' === cb_attribute( 'srcset', $input ), 'A comma inside a URL was treated as a candidate separator.' );
+	}
+	foreach ( array( '', '  ', ', one.png 1x', 'one.png,, two.png 2x' ) as $invalid ) { cb_check( '<a>link</a>' === cb_attribute( 'srcset', $invalid ), 'Empty or malformed srcset candidate was retained.' ); }
 };
 $cb_cases['URL serialization expansion enforces its own output budget'] = function () {
 	cb_error( Remote_Content_Shortcode_URLs::rewrite( str_repeat( '&', 220000 ), 'https://example.com/' ), 'html_too_large' );

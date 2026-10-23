@@ -28,7 +28,8 @@ $tests['malformed storage never becomes a usable credential'] = static function 
 	$row = rcs_fp_fixture(); unset( $row['_wpnonce'], $row['alias'], $row['secret'] ); $row['sealed'] = array( 'malformed' );
 	update_option( Remote_Content_Shortcode_Connections::OPTION, array( 4 => $row, 'bad alias' => $row, 'scalar' => 'bad', 'bad-scope' => array( 'auth' => 'bearer' ), 'valid' => $row ), false );
 	$all = Remote_Content_Shortcode_Connections::all();
-	rcs_fp_assert( array( 'valid' ) === array_keys( $all ) && false === $all['valid']['has_secret'], 'Malformed stored rows became editor metadata.' );
+	rcs_fp_assert( array( 4, 'valid' ) === array_keys( $all ) && false === $all[4]['has_secret'] && false === $all['valid']['has_secret'], 'Invalid scopes or malformed sealed values became usable connections.' );
+	rcs_fp_error( Remote_Content_Shortcode_Connections::secret( '4' ), 'secret_unavailable' );
 	rcs_fp_error( Remote_Content_Shortcode_Connections::secret( 'valid' ), 'secret_unavailable' );
 	foreach ( array( '', 'bad alias', array(), 'missing' ) as $alias ) { rcs_fp_error( Remote_Content_Shortcode_Connections::secret( $alias ), 'secret_unavailable' ); }
 };
@@ -68,7 +69,7 @@ $tests['configured aliases reveal names only and malformed filters fail closed']
 	add_filter( 'remote_content_shortcode_credentials', $code, 30 );
 	try {
 		$all = Remote_Content_Shortcode_Connections::all();
-		rcs_fp_assert( array( 'php-defined' => array( 'read_only' => true ) ) === $all, 'Configured alias metadata disclosed scope, storage name or malformed aliases.' );
+		rcs_fp_assert( array( 'php-defined' => array( 'read_only' => true ), 12 => array( 'read_only' => true ) ) === $all, 'Configured alias metadata disclosed scope, storage name or malformed aliases.' );
 		$html = rcs_fp_page( 'connections' );
 		rcs_fp_assert( str_contains( $html, 'Configured in PHP, read only.' ) && ! str_contains( $html, 'private-option-name' ) && ! str_contains( $html, 'private.invalid' ), 'Configured connection form exposed code-managed scope.' );
 		rcs_fp_error( Remote_Content_Shortcode_Connections::secret( 'php-defined' ), 'secret_unavailable' );

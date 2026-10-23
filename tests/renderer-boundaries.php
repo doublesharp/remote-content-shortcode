@@ -179,6 +179,20 @@ $tests['internationalized hostname uses its canonical ASCII destination'] = stat
 	$assert( '<p>Boundary content</p>' === $render( array( 'url' => 'https://bücher.rcs.test/content' ) ), 'Internationalized hostname was rejected' );
 	$assert( 1 === count( $calls ) && 'https://xn--bcher-kva.rcs.test/content' === $calls[0]['url'], 'IDNA canonical destination was not used for HTTP' );
 };
+$tests['Unicode and punycode credential origins identify the same endpoint'] = static function () use ( $render, $assert, &$calls ) {
+	update_option( 'rcs_idna_secret', 'idna-token' );
+	try {
+		foreach ( array( 'https://bücher.rcs.test', 'https://xn--bcher-kva.rcs.test' ) as $origin ) {
+			$definition = static fn() => array( 'idna' => array( 'type' => 'option', 'key' => 'rcs_idna_secret', 'auth' => 'bearer', 'origin' => $origin, 'path' => '/content' ) );
+			add_filter( 'remote_content_shortcode_credentials', $definition );
+			try {
+				$before = count( $calls );
+				$assert( '<p>Boundary content</p>' === $render( array( 'url' => 'https://bücher.rcs.test/content', 'userpwd' => 'idna' ) ), 'Equivalent IDNA credential origin was rejected.' );
+				$assert( 1 === count( $calls ) - $before && 'Bearer idna-token' === $calls[ $before ]['args']['headers']['Authorization'], 'IDNA request did not carry its configured credential.' );
+			} finally { remove_filter( 'remote_content_shortcode_credentials', $definition ); }
+		}
+	} finally { delete_option( 'rcs_idna_secret' ); }
+};
 $tests['diagnostic timeout clamps scalar and malformed values'] = static function () use ( $diagnose, $assert, &$calls ) {
 	foreach ( array( array(), new stdClass(), null, 100, 0, -5, '3' ) as $timeout ) {
 		$result = $diagnose( array( 'timeout' => $timeout ) );

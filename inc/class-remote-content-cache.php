@@ -17,12 +17,28 @@ class Remote_Content_Shortcode_Cache {
 		return wp_using_ext_object_cache() ? wp_cache_set( $id, $value, self::GROUP, $ttl ) : set_transient( $id, $value, $ttl );
 	}
 	private static function remove( $id ) {
-		return wp_using_ext_object_cache() ? wp_cache_delete( $id, self::GROUP ) : delete_transient( $id );
+		wp_cache_delete( $id, self::GROUP );
+		wp_cache_delete( $id, 'transient' );
+		delete_option( '_transient_' . $id );
+		delete_option( '_transient_timeout_' . $id );
+	}
+	private static function valid_response( $value ) {
+		return is_array( $value ) && isset( $value['body'], $value['url'] ) && is_string( $value['body'] ) && is_string( $value['url'] );
+	}
+	private static function entry( $id ) {
+		$entry = self::read( $id );
+		if ( ! is_array( $entry ) || ! isset( $entry['fresh_until'], $entry['stale_until'], $entry['value'] ) || ! is_int( $entry['fresh_until'] ) || ! is_int( $entry['stale_until'] ) || ( ! is_wp_error( $entry['value'] ) && ! self::valid_response( $entry['value'] ) ) ) { return false; }
+		// The database remains authoritative when a disconnected object cache returns
+		// with old payloads and old option caches. Tokens distinguish replacement writes.
+		$index = self::index();
+		$meta = $index[ $id ] ?? null;
+		if ( ! is_array( $meta ) || ! is_int( $meta['expires'] ?? null ) || $meta['expires'] <= time() || ( $entry['token'] ?? null ) !== ( $meta['token'] ?? null ) ) { return false; }
+		return $entry;
 	}
 	/** The database owns metadata, including when an external cache evicts payloads. */
 	private static function index() {
 		global $wpdb;
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- The authoritative index must bypass stale option caches under the mutation lock.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Validity checks and locked mutations must bypass stale option caches across backend changes.
 		$raw = $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", self::INDEX ) );
 		$index = is_string( $raw ) ? maybe_unserialize( $raw ) : array();
 		return is_array( $index ) ? $index : array();
@@ -77,18 +93,18 @@ class Remote_Content_Shortcode_Cache {
 	}
 
 	public static function get( $key, $allow_stale = false ) {
-		$entry = self::read( self::id( $key ) );
-		if ( ! is_array( $entry ) || ! isset( $entry['fresh_until'], $entry['stale_until'], $entry['value'] ) ) { return false; }
+		$entry = self::entry( self::id( $key ) );
+		if ( false === $entry ) { return false; }
 		if ( $allow_stale ) {
 			if ( $entry['stale_until'] <= time() ) { return false; }
 			$good = isset( $entry['good'] ) ? $entry['good'] : $entry['value'];
-			return is_wp_error( $good ) ? false : $good;
+			return self::valid_response( $good ) ? $good : false;
 		}
 		return $entry['fresh_until'] > time() ? $entry['value'] : false;
 	}
 
 	public static function set( $key, $value, $ttl, $stale_ttl = 0, $tag = '' ) {
-		if ( ! is_wp_error( $value ) && ( ! is_array( $value ) || ! isset( $value['body'], $value['url'] ) || ! is_string( $value['body'] ) || ! is_string( $value['url'] ) ) ) { return false; }
+		if ( ! is_wp_error( $value ) && ! self::valid_response( $value ) ) { return false; }
 		if ( is_wp_error( $value ) ) {
 			$code = substr( sanitize_key( (string) $value->get_error_code() ), 0, 80 );
 			$value = new WP_Error( $code ?: 'remote_content_error' );
@@ -102,13 +118,13 @@ class Remote_Content_Shortcode_Cache {
 			self::prune( $index );
 			$id = self::id( $key );
 			$now = time();
-			$entry = array( 'value' => $value, 'fresh_until' => $now + $ttl, 'stale_until' => $now + $ttl + max( 0, (int) $stale_ttl ) );
+			$entry = array( 'value' => $value, 'fresh_until' => $now + $ttl, 'stale_until' => $now + $ttl + max( 0, (int) $stale_ttl ), 'token' => wp_generate_uuid4() );
 			if ( is_wp_error( $value ) ) {
-				$old = self::read( $id );
+				$old = self::entry( $id );
 				$entry['stale_until'] = 0;
 				if ( is_array( $old ) && isset( $old['stale_until'], $old['value'] ) && $old['stale_until'] > $now ) {
 					$good = isset( $old['good'] ) ? $old['good'] : $old['value'];
-					if ( ! is_wp_error( $good ) ) {
+					if ( self::valid_response( $good ) ) {
 						$entry['good'] = $good;
 						$entry['stale_until'] = $old['stale_until'];
 					}
@@ -124,7 +140,7 @@ class Remote_Content_Shortcode_Cache {
 				unset( $index[ $oldest ] );
 			}
 			$expires = max( $entry['fresh_until'], $entry['stale_until'] );
-			$index[ $id ] = array( 'bytes' => $bytes, 'expires' => $expires, 'tag' => hash( 'sha256', (string) $tag ) );
+			$index[ $id ] = array( 'bytes' => $bytes, 'expires' => $expires, 'tag' => hash( 'sha256', (string) $tag ), 'token' => $entry['token'] );
 			// Reserve the bytes before storing the payload; a failed write is a cache miss.
 			if ( ! self::save_index( $index ) ) { return false; }
 			return self::write( $id, $entry, max( 1, $expires - $now ) );
