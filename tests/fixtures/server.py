@@ -85,8 +85,10 @@ class HTTP(BaseHTTPRequestHandler):
                 pass
             self.close_connection = True
             return
+        if path in ("/slow-redirect", "/slow-final"):
+            time.sleep(0.65)
         status = 503 if path == "/failure" else 200
-        location = {"/redirect": "/ok", "/private-redirect": "http://private.rcs.test/ok", "/loop": "/loop"}.get(path)
+        location = {"/redirect": "/ok", "/slow-redirect": "/slow-final", "/private-redirect": "http://private.rcs.test/ok", "/loop": "/loop"}.get(path)
         if location:
             status, body = 302, b""
         if path == "/slow-overflow":

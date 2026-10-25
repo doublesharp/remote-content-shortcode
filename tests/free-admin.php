@@ -33,6 +33,110 @@ $tests['connections retain replace and delete encrypted secrets'] = static funct
 	$data['delete_secret'] = '1'; rcs_free_assert( 'free-test' === Remote_Content_Shortcode_Connections::save( $data ) && is_wp_error( Remote_Content_Shortcode_Connections::secret( 'free-test' ) ), 'Explicit secret removal failed.' );
 	$_REQUEST['_wpnonce'] = wp_create_nonce( 'rcs_connections' ); rcs_free_assert( true === Remote_Content_Shortcode_Connections::delete( 'free-test' ) && true === Remote_Content_Shortcode_Connections::delete( 'free-test' ), 'Delete is not idempotent.' );
 };
+foreach ( array( 'remove secret', 'delete connection' ) as $mutation ) {
+	$tests[ 'expired connection writers cannot undo ' . $mutation ] = static function () use ( $fixture, $mutation ) {
+		rcs_free_assert( 'alpha' === Remote_Content_Shortcode_Connections::save( $fixture( 'alpha' ) ) && 'beta' === Remote_Content_Shortcode_Connections::save( $fixture( 'beta' ) ), 'Could not seed expired writer fixture.' );
+		$concurrent = null;
+		$interleave = static function ( $value ) use ( &$interleave, &$concurrent, $fixture, $mutation ) {
+			remove_filter( 'pre_update_option_' . Remote_Content_Shortcode_Connections::OPTION, $interleave );
+			// Simulate the first writer stalling until its lease expires, then a second writer taking over.
+			update_option( Remote_Content_Shortcode_Connections::LOCK, ( time() - 1 ) . ':expired-writer', false );
+			if ( 'delete connection' === $mutation ) {
+				$_REQUEST['_wpnonce'] = wp_create_nonce( 'rcs_connections' );
+				$concurrent = Remote_Content_Shortcode_Connections::delete( 'alpha' );
+			} else {
+				$data = $fixture( 'alpha' ); $data['secret'] = ''; $data['delete_secret'] = '1';
+				$concurrent = Remote_Content_Shortcode_Connections::save( $data );
+			}
+			return $value;
+		};
+		add_filter( 'pre_update_option_' . Remote_Content_Shortcode_Connections::OPTION, $interleave );
+		try { $beta = $fixture( 'beta' ); $beta['path'] = '/edited'; $result = Remote_Content_Shortcode_Connections::save( $beta ); }
+		finally { remove_filter( 'pre_update_option_' . Remote_Content_Shortcode_Connections::OPTION, $interleave ); }
+		rcs_free_assert( null !== $concurrent && ! is_wp_error( $concurrent ), 'The replacement writer did not complete its removal.' );
+		rcs_free_assert( is_wp_error( $result ) && 'connection_storage_failed' === $result->get_error_code() && is_wp_error( Remote_Content_Shortcode_Connections::secret( 'alpha' ) ), 'An expired writer restored deleted credentials.' );
+		rcs_free_assert( 'beta' === Remote_Content_Shortcode_Connections::save( $beta ) && is_wp_error( Remote_Content_Shortcode_Connections::secret( 'alpha' ) ), 'Retrying the expired edit lost the successful removal.' );
+	};
+	$tests[ 'connection edits preserve concurrent ' . $mutation ] = static function () use ( $fixture, $mutation ) {
+		rcs_free_assert( 'alpha' === Remote_Content_Shortcode_Connections::save( $fixture( 'alpha' ) ) && 'beta' === Remote_Content_Shortcode_Connections::save( $fixture( 'beta' ) ), 'Could not seed concurrent connections.' );
+		$remove = static function () use ( $fixture, $mutation ) {
+			if ( 'delete connection' === $mutation ) {
+				$_REQUEST['_wpnonce'] = wp_create_nonce( 'rcs_connections' );
+				return Remote_Content_Shortcode_Connections::delete( 'alpha' );
+			}
+			$data = $fixture( 'alpha' ); $data['secret'] = ''; $data['delete_secret'] = '1';
+			return Remote_Content_Shortcode_Connections::save( $data );
+		};
+		$concurrent = null;
+		$interleave = static function ( $value ) use ( &$interleave, &$concurrent, $remove ) {
+			remove_filter( 'pre_update_option_' . Remote_Content_Shortcode_Connections::OPTION, $interleave );
+			$concurrent = $remove();
+			return $value;
+		};
+		add_filter( 'pre_update_option_' . Remote_Content_Shortcode_Connections::OPTION, $interleave );
+		try {
+			$beta = $fixture( 'beta' ); $beta['path'] = '/edited';
+			rcs_free_assert( 'beta' === Remote_Content_Shortcode_Connections::save( $beta ), 'Outer connection edit failed.' );
+		} finally { remove_filter( 'pre_update_option_' . Remote_Content_Shortcode_Connections::OPTION, $interleave ); }
+		if ( is_wp_error( $concurrent ) ) {
+			rcs_free_assert( 'connection_busy' === $concurrent->get_error_code() && ! is_wp_error( $remove() ), 'Contended connection removal could not be retried.' );
+		}
+		rcs_free_assert( is_wp_error( Remote_Content_Shortcode_Connections::secret( 'alpha' ) ), 'A concurrent edit restored a removed secret.' );
+		rcs_free_assert( '/edited' === Remote_Content_Shortcode_Connections::all()['beta']['path'], 'Concurrent removal lost another connection edit.' );
+	};
+}
+$tests['late option cache repopulation cannot restore removed credentials'] = static function () use ( $fixture ) {
+	global $wpdb;
+	rcs_free_assert( 'alpha' === Remote_Content_Shortcode_Connections::save( $fixture( 'alpha' ) ) && 'beta' === Remote_Content_Shortcode_Connections::save( $fixture( 'beta' ) ), 'Could not seed delayed reader fixture.' );
+	$stale = get_option( Remote_Content_Shortcode_Connections::OPTION );
+	$_REQUEST['_wpnonce'] = wp_create_nonce( 'rcs_connections' );
+	rcs_free_assert( true === Remote_Content_Shortcode_Connections::delete( 'alpha' ), 'Could not remove the delayed reader secret.' );
+	$pending = false; $poisoned = false;
+	$repopulate = static function ( $sql ) use ( &$pending, &$poisoned, $stale ) {
+		if ( str_starts_with( $sql, 'INSERT IGNORE INTO' ) && str_contains( $sql, "'" . Remote_Content_Shortcode_Connections::LOCK . "'" ) ) {
+			$pending = true;
+			wp_cache_delete( 'alloptions', 'options' );
+		} elseif ( $pending && str_starts_with( $sql, 'SELECT' ) ) {
+			// Resume an older reader after the new writer has invalidated the option cache.
+			$pending = false; $poisoned = true;
+			wp_cache_set( Remote_Content_Shortcode_Connections::OPTION, maybe_serialize( $stale ), 'options' );
+		}
+		return $sql;
+	};
+	add_filter( 'query', $repopulate );
+	try { $beta = $fixture( 'beta' ); $beta['path'] = '/edited'; $result = Remote_Content_Shortcode_Connections::save( $beta ); }
+	finally { remove_filter( 'query', $repopulate ); }
+	$stored = maybe_unserialize( $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", Remote_Content_Shortcode_Connections::OPTION ) ) );
+	rcs_free_assert( $poisoned && 'beta' === $result && ! isset( $stored['alpha'] ) && '/edited' === ( $stored['beta']['path'] ?? null ), 'A delayed option cache reader restored removed credentials.' );
+};
+$tests['connection mutations respect active locks and recover expired locks'] = static function () use ( $fixture ) {
+	rcs_free_assert( 'alpha' === Remote_Content_Shortcode_Connections::save( $fixture( 'alpha' ) ), 'Could not seed locked inventory.' );
+	$old = get_option( Remote_Content_Shortcode_Connections::OPTION );
+	$owner = ( time() + 60 ) . ':active-owner';
+	rcs_free_assert( add_option( Remote_Content_Shortcode_Connections::LOCK, $owner, '', false ), 'Could not reserve connection lock.' );
+	try {
+		$_REQUEST['_wpnonce'] = wp_create_nonce( 'rcs_connections' );
+		foreach ( array( Remote_Content_Shortcode_Connections::save( $fixture( 'beta' ) ), Remote_Content_Shortcode_Connections::delete( 'alpha' ) ) as $result ) {
+			rcs_free_assert( is_wp_error( $result ) && 'connection_busy' === $result->get_error_code(), 'Active connection mutation lock was ignored.' );
+		}
+		rcs_free_assert( $old === get_option( Remote_Content_Shortcode_Connections::OPTION ) && $owner === get_option( Remote_Content_Shortcode_Connections::LOCK ), 'Contended mutation changed the inventory or lock owner.' );
+		update_option( Remote_Content_Shortcode_Connections::LOCK, ( time() - 1 ) . ':expired-owner', false );
+		rcs_free_assert( 'beta' === Remote_Content_Shortcode_Connections::save( $fixture( 'beta' ) ), 'Expired connection lock was not recovered.' );
+		rcs_free_assert( false === get_option( Remote_Content_Shortcode_Connections::LOCK, false ), 'Successful mutation leaked its connection lock.' );
+	} finally { delete_option( Remote_Content_Shortcode_Connections::LOCK ); }
+};
+$tests['connection mutation exceptions release the lock without changing secrets'] = static function () use ( $fixture ) {
+	rcs_free_assert( 'alpha' === Remote_Content_Shortcode_Connections::save( $fixture( 'alpha' ) ), 'Could not seed exception fixture.' );
+	$old = get_option( Remote_Content_Shortcode_Connections::OPTION );
+	$throw = static function () { throw new RuntimeException( 'connection write interrupted' ); };
+	add_filter( 'pre_update_option_' . Remote_Content_Shortcode_Connections::OPTION, $throw );
+	$caught = false;
+	try { Remote_Content_Shortcode_Connections::save( $fixture( 'beta' ) ); }
+	catch ( RuntimeException $error ) { $caught = 'connection write interrupted' === $error->getMessage(); }
+	finally { remove_filter( 'pre_update_option_' . Remote_Content_Shortcode_Connections::OPTION, $throw ); }
+	rcs_free_assert( $caught && $old === get_option( Remote_Content_Shortcode_Connections::OPTION ) && false === get_option( Remote_Content_Shortcode_Connections::LOCK, false ), 'Interrupted mutation changed secrets or retained its lock.' );
+	rcs_free_assert( 'beta' === Remote_Content_Shortcode_Connections::save( $fixture( 'beta' ) ), 'Interrupted mutation blocked the next edit.' );
+};
 $tests['numeric aliases survive storage and remain usable credentials'] = static function () use ( $fixture ) {
 	foreach ( array( '0', '123', '-123', '00123' ) as $alias ) {
 		$data = $fixture( $alias );
@@ -49,18 +153,20 @@ $tests['numeric aliases survive storage and remain usable credentials'] = static
 	}
 };
 $tests['connection listing reads its inventory a constant number of times'] = static function () use ( $fixture ) {
+	global $wpdb;
 	rcs_free_assert( 'inventory' === Remote_Content_Shortcode_Connections::save( $fixture( 'inventory' ) ), 'Could not create inventory fixture.' );
 	$row = get_option( Remote_Content_Shortcode_Connections::OPTION )['inventory'];
 	$rows = array();
 	for ( $i = 0; $i < Remote_Content_Shortcode_Connections::LIMIT; ++$i ) { $rows[ 'inventory-' . $i ] = $row; }
 	update_option( Remote_Content_Shortcode_Connections::OPTION, $rows, false );
 	$reads = 0;
-	$observe = static function ( $value ) use ( &$reads ) { ++$reads; return $value; };
-	add_filter( 'option_' . Remote_Content_Shortcode_Connections::OPTION, $observe );
+	$lookup = $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", Remote_Content_Shortcode_Connections::OPTION );
+	$observe = static function ( $sql ) use ( &$reads, $lookup ) { if ( $lookup === $sql ) { ++$reads; } return $sql; };
+	add_filter( 'query', $observe );
 	try { $all = Remote_Content_Shortcode_Connections::all(); }
-	finally { remove_filter( 'option_' . Remote_Content_Shortcode_Connections::OPTION, $observe ); }
+	finally { remove_filter( 'query', $observe ); }
 	rcs_free_assert( count( $rows ) === count( $all ) && true === $all['inventory-0']['has_secret'], 'Listing lost connection metadata.' );
-	rcs_free_assert( $reads <= 3, 'Listing repeatedly loaded and validated the full inventory: ' . $reads . ' reads.' );
+	rcs_free_assert( $reads > 0 && $reads <= 3, 'Listing repeatedly loaded and validated the full inventory: ' . $reads . ' reads.' );
 };
 $tests['connections reject malformed scopes and reserved headers'] = static function () use ( $fixture ) {
 	foreach ( array( 'alias' => array( '', 'bad alias', str_repeat( 'a', 65 ), array() ), 'auth' => array( 'oauth', array() ), 'origin' => array( 'http://example.com', 'https://user:pass@example.com', 'https://example.com/a', 'https://example.com?key=secret' ), 'path' => array( '', 'endpoint', '/a?b', '/a\\b', '/a/../b', '/%2e%2e/b', '/a b' ), 'methods' => array( array(), array( 'DELETE' ), array( array( 'GET' ) ), array( new stdClass() ), 'GET' ), 'secret' => array( "bad\nvalue", str_repeat( 'a', 8193 ), array() ) ) as $field => $values ) {
@@ -109,6 +215,22 @@ $tests['builder preserves quoted edge values through the real parser'] = static 
 	$input = array( '_wpnonce' => wp_create_nonce( 'rcs_tools' ), 'rcs_action' => 'generate', 'url' => 'http://source.rcs.test/ok', 'selector' => '.no-such-element', 'fallback' => '"quoted [edge]"' );
 	$generated = Remote_Content_Shortcode_Admin::process_action( $input );
 	rcs_free_assert( is_string( $generated ) && '"quoted [edge]"' === do_shortcode( $generated ), 'Builder lost literal edge quotes or brackets.' );
+};
+$tests['builder preserves regex backslashes through the real parser'] = static function () {
+	$input = array( '_wpnonce' => wp_create_nonce( 'rcs_tools' ), 'rcs_action' => 'generate', 'url' => 'http://source.rcs.test/ok', 'cache' => 'false' );
+	$offline = static fn() => array( 'headers' => array(), 'body' => 'Version 123', 'response' => array( 'code' => 200 ) );
+	add_filter( 'pre_http_request', $offline );
+	try {
+		foreach ( array(
+			array( 'find' => '~\\d+~', 'replace' => 'X', 'expected' => 'Version X' ),
+			array( 'find' => '~(Version) ([0-9]+)~', 'replace' => '\\2 \\1', 'expected' => '123 Version' ),
+		) as $case ) {
+			$atts = array_merge( $input, $case );
+			$direct = RemoteContentShortcode::get_instance()->remote_content_shortcode( $atts );
+			$generated = Remote_Content_Shortcode_Admin::process_action( $atts );
+			rcs_free_assert( $case['expected'] === $direct && is_string( $generated ) && $direct === do_shortcode( $generated ), 'Generated shortcode changed a regex escape or replacement backreference.' );
+		}
+	} finally { remove_filter( 'pre_http_request', $offline ); }
 };
 $document = static function ( $html ) {
 	$document = new DOMDocument();

@@ -50,7 +50,7 @@ class Remote_Content_Shortcode_Admin {
 		$shortcode = '[remote_content decode_atts="true"';
 		foreach ( $atts as $key => $value ) {
 			if ( strlen( $value ) > 4096 ) { return new WP_Error( 'invalid_attributes' ); }
-			if ( '' !== $value ) { $encoded = str_replace( array( '[', ']' ), array( '&#91;', '&#93;' ), htmlspecialchars( '"' . $value . '"', ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8' ) ); $shortcode .= ' ' . $key . '="' . $encoded . '"'; }
+			if ( '' !== $value ) { $encoded = str_replace( array( '\\', '[', ']' ), array( '&#92;', '&#91;', '&#93;' ), htmlspecialchars( '"' . $value . '"', ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8' ) ); $shortcode .= ' ' . $key . '="' . $encoded . '"'; }
 		}
 		return $shortcode . ']' . ( null !== $body && '' !== $body ? $body . '[/remote_content]' : '' );
 	}

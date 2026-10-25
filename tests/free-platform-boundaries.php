@@ -92,6 +92,7 @@ $tests['connection headers use the saved secret only in their exact scope'] = st
 	}
 };
 $tests['connection scope changes cannot send a new secret through a captured old definition'] = static function () {
+	global $wpdb;
 	$first = rcs_fp_fixture(); $first['path'] = '/scope-a'; $first['secret'] = 'old-scope-token';
 	rcs_fp_assert( 'platform-fixture' === Remote_Content_Shortcode_Connections::save( $first ), 'Initial scoped connection could not be saved.' );
 	$old_definition = Remote_Content_Shortcode_Connections::definitions( array() )['platform-fixture'];
@@ -105,14 +106,23 @@ $tests['connection scope changes cannot send a new secret through a captured old
 	$current = Remote_Content_Shortcode_Connections::definitions( array() )['platform-fixture'];
 	rcs_fp_assert( array( 'X-New-Key' => 'new-scope-secret' ) === Remote_Content_Shortcode_Credentials::headers( $current, 'https://other.example.com/scope-b', 'GET' ), 'New definition did not bind the updated secret and authentication mode.' );
 	$stored_b = get_option( Remote_Content_Shortcode_Connections::OPTION );
+	$lookup = $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", Remote_Content_Shortcode_Connections::OPTION );
 	for ( $transition_after = 1; $transition_after <= 8; ++$transition_after ) {
 		$reads = 0;
-		$interleave = static function () use ( &$reads, $transition_after, $stored_a, $stored_b ) { return ++$reads <= $transition_after ? $stored_b : $stored_a; };
-		add_filter( 'pre_option_' . Remote_Content_Shortcode_Connections::OPTION, $interleave, 99 );
+		$interleave = static function ( $sql ) use ( &$reads, $transition_after, $stored_a, $stored_b, $wpdb, $lookup ) {
+			if ( $lookup === $sql ) {
+				$snapshot = ++$reads <= $transition_after ? $stored_b : $stored_a;
+				$wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s", maybe_serialize( $snapshot ), Remote_Content_Shortcode_Connections::OPTION ) );
+			}
+			return $sql;
+		};
+		add_filter( 'query', $interleave, 99 );
 		try { $headers = Remote_Content_Shortcode_Credentials::headers( $old_definition, 'https://example.com/scope-a', 'GET' ); }
-		finally { remove_filter( 'pre_option_' . Remote_Content_Shortcode_Connections::OPTION, $interleave, 99 ); }
-		rcs_fp_assert( is_wp_error( $headers ) || array( 'Authorization' => 'Bearer old-scope-token' ) === $headers, 'Mixed connection snapshots sent another endpoint\'s secret through an old definition.' );
+		finally { remove_filter( 'query', $interleave, 99 ); }
+		rcs_fp_assert( $reads > 0 && ( is_wp_error( $headers ) || array( 'Authorization' => 'Bearer old-scope-token' ) === $headers ), 'Mixed connection snapshots sent another endpoint\'s secret through an old definition.' );
 	}
+	wp_cache_delete( Remote_Content_Shortcode_Connections::OPTION, 'options' );
+	update_option( Remote_Content_Shortcode_Connections::OPTION, $stored_b, false );
 	rcs_fp_assert( 'new-scope-secret' === Remote_Content_Shortcode_Connections::secret( 'platform-fixture' ), 'Trusted PHP direct secret resolution changed unexpectedly.' );
 };
 $tests['every connections POST path requires its own nonce and displays safe outcomes'] = static function () {

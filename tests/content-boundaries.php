@@ -125,6 +125,10 @@ $cb_cases['URL empty input and exact input budget preserve content'] = function 
 	$html = str_repeat( 'x', 1048576 );
 	cb_check( $html === Remote_Content_Shortcode_URLs::rewrite( $html, 'https://example.com/' ), 'One MiB plain text rejected' );
 };
+$cb_cases['URL rewriting rejects parser truncation'] = function () {
+	$html = str_repeat( '<div>', 600 ) . '<p>KEEP-ME</p>' . str_repeat( '</div>', 600 );
+	cb_error( Remote_Content_Shortcode_URLs::rewrite( $html, 'https://example.com/' ), 'invalid_html' );
+};
 foreach ( array( 'empty' => '', 'too long' => str_repeat( 'x', 8193 ), 'embedded whitespace' => 'two words', 'backslash' => 'a\\b', 'DEL' => "a\x7fb", 'scheme' => 'ftp://example.com/file', 'userinfo' => 'https://user@example.com/file' ) as $label => $value ) {
 	$cb_cases[ 'URL attribute: ' . $label ] = function () use ( $value, $label ) {
 		$out = cb_attribute( 'href', $value );

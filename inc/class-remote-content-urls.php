@@ -9,7 +9,10 @@ class Remote_Content_Shortcode_URLs {
 		$previous = libxml_use_internal_errors( true );
 		try {
 			$document = new DOMDocument( '1.0', 'UTF-8' );
+			libxml_clear_errors();
 			if ( ! $document->loadHTML( '<?xml encoding="UTF-8"><html><body>' . $html . '</body></html>', LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING ) ) { return new WP_Error( 'invalid_html' ); }
+			// libxml can report success after truncating an excessively deep document.
+			foreach ( libxml_get_errors() as $error ) { if ( LIBXML_ERR_FATAL === $error->level ) { return new WP_Error( 'invalid_html' ); } }
 			$elements = $document->getElementsByTagName( '*' );
 			if ( $elements->length > 20000 ) { return new WP_Error( 'html_too_complex' ); }
 			$remove = array();

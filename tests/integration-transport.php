@@ -44,6 +44,9 @@ $check( 'untrusted TLS certificate', function () use ( $render, &$diagnostic ) {
 	return '' === $render( 'https://untrusted.rcs.test/ok' ) && is_wp_error( $diagnostic ) && str_contains( strtolower( $diagnostic->get_error_message() ), 'ssl' );
 } );
 $check( 'real GET redirect', fn() => str_contains( $render( '/redirect' ), 'fixture success' ) );
+$check( 'real redirect hops share the configured timeout', function () use ( $render, &$diagnostic ) {
+	return '' === $render( '/slow-redirect', array( 'timeout' => 1 ) ) && is_wp_error( $diagnostic );
+} );
 $check( 'private redirect is stopped before a second connection', function () use ( $render, $stats, &$diagnostic ) {
 	$before = $stats();
 	$output = $render( '/private-redirect' );

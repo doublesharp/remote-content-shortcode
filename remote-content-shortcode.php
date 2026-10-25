@@ -378,7 +378,7 @@ if ( ! class_exists( 'RemoteContentShortcode' ) ) {
 					return new WP_Error( 'request_timeout' );
 				}
 				$args['timeout'] = min( $args['timeout'], $remaining );
-				$response = $this->pinned_request( $url, $args, $address );
+				$response = $this->pinned_request( $url, $args, $address, $deadline );
 				if ( is_wp_error( $response ) ) {
 					return $response;
 				}
@@ -407,7 +407,7 @@ if ( ! class_exists( 'RemoteContentShortcode' ) ) {
 			}
 		}
 
-		private function pinned_request( $url, $args, $address ) {
+		private function pinned_request( $url, $args, $address, $deadline ) {
 			$proxy = new WP_HTTP_Proxy();
 			if ( $proxy->is_enabled() && $proxy->send_through_proxy( $url ) ) {
 				return new WP_Error( 'proxy_not_supported' );
@@ -419,15 +419,19 @@ if ( ! class_exists( 'RemoteContentShortcode' ) ) {
 			$preempted = false;
 			$expected_handle = null;
 			$capture = static function ( $handle ) use ( &$expected_handle ) { $expected_handle = $handle; };
-			$pin = static function ( $handle ) use ( $url, $host, $port, $address, &$expected_handle, &$pinned ) {
+			$pin = static function ( $handle ) use ( $url, $host, $port, $address, $deadline, &$expected_handle, &$pinned ) {
 				if ( $handle !== $expected_handle ) {
 					return;
 				}
+				$remaining = $deadline - microtime( true );
+				if ( $remaining <= 0 ) { throw new WpOrg\Requests\Exception( 'Request deadline exceeded.', 'remote_content_request_timeout' ); }
 				// Use the checked address while retaining the original Host header, SNI, and certificate name.
 				// WordPress rejects IPv6 literals; hostname resolution selects an IPv4 address.
 				// phpcs:ignore WordPress.WP.AlternativeFunctions.curl_curl_setopt_array -- Configure WordPress's own cURL transport for DNS pinning.
 				$configured = curl_setopt_array( $handle, array(
 					CURLOPT_URL => $url,
+					// Requests rounds subsecond timeouts up. Enforce the shared deadline after its setup and hooks.
+					CURLOPT_TIMEOUT_MS => max( 1, (int) floor( $remaining * 1000 ) ),
 					CURLOPT_RESOLVE => array( $host . ':' . $port . ':' . $address ),
 					CURLOPT_CONNECT_TO => array( '::' . $address . ':' . $port ),
 					CURLOPT_PROXY => '',

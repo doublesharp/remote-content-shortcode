@@ -27,6 +27,7 @@ function remote_content_shortcode_uninstall_cache_site() {
 	delete_option( 'rcs_v2_cache_index' );
 	delete_option( 'rcs_v2_cache_lock' );
 	delete_option( 'rcs_connections_v1' );
+	delete_option( 'rcs_connections_v1_lock' );
 }
 
 if ( is_multisite() ) {

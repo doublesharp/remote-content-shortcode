@@ -290,6 +290,11 @@ $tests['URL rewriting failures use redacted diagnostics and the safe fallback'] 
 	$result = $diagnose( array( 'rewrite_urls' => 'true', 'fallback' => '<b>Unavailable</b>' ) );
 	$assert( false === $result['ok'] && 'html_too_large' === $result['error_code'] && '<b>Unavailable</b>' === $result['html'], 'Rewriting failure bypassed diagnostics or fallback handling' );
 };
+$tests['URL parser truncation uses the safe fallback'] = static function () use ( $diagnose, $assert, &$reply ) {
+	$reply = str_repeat( '<div>', 600 ) . '<p>KEEP-ME</p>' . str_repeat( '</div>', 600 );
+	$result = $diagnose( array( 'rewrite_urls' => 'true', 'fallback' => '<b>Unavailable</b>' ) );
+	$assert( false === $result['ok'] && 'invalid_html' === $result['error_code'] && '<b>Unavailable</b>' === $result['html'], 'Truncated HTML was published instead of the fallback' );
+};
 
 $failures = 0;
 $hooks = array( 'remote_content_shortcode_url', 'remote_content_shortcode_postfields', 'remote_content_shortcode_phpQuery', 'remote_content_shortcode_return', 'remote_content_shortcode_error', 'remote_content_shortcode_credentials', 'http_request_host_is_external' );
