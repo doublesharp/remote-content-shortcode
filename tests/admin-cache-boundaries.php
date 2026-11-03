@@ -60,12 +60,18 @@ $tests['POST clear returns a success notice and removes cached content'] = stati
 $tests['GET and malformed request methods only show the form'] = static function () use ( $page ) {
 	foreach ( array( 'GET', null, array( 'POST' ) ) as $method ) {
 		$html = $page( array( 'rcs_action' => 'clear', '_wpnonce' => 'invalid' ), $method );
-		rcs_ac_assert( str_contains( $html, '<form method="post">' ) && ! str_contains( $html, 'notice-success' ), 'Non-POST request performed an action.' );
+		rcs_ac_assert( 1 === preg_match( '/<form\s[^>]*\bmethod="post"[^>]*>/', $html ) && ! str_contains( $html, 'notice-success' ), 'Non-POST request performed an action.' );
 	}
 };
 $tests['tools form defaults relative URL rewriting to disabled'] = static function () use ( $page ) {
 	$html = $page( array(), 'GET' );
-	rcs_ac_assert( str_contains( $html, '<select id="rcs-rewrite_urls" name="rewrite_urls"><option value="true">' . esc_html__( 'Yes', 'remote-content-shortcode' ) . '</option><option value="false" selected>' ), 'Rewrite URL default changed.' );
+	$document = new DOMDocument();
+	$previous = libxml_use_internal_errors( true );
+	try { $document->loadHTML( $html ); } finally { libxml_clear_errors(); libxml_use_internal_errors( $previous ); }
+	$xpath = new DOMXPath( $document );
+	$selected = $xpath->query( '//select[@id="rcs-rewrite_urls" and @name="rewrite_urls"]/option[@value="false" and @selected]' );
+	$other = $xpath->query( '//select[@id="rcs-rewrite_urls" and @name="rewrite_urls"]/option[@value="true" and not(@selected)]' );
+	rcs_ac_assert( 1 === $selected->length && 1 === $other->length && __( 'No', 'remote-content-shortcode' ) === $selected->item( 0 )->textContent && __( 'Yes', 'remote-content-shortcode' ) === $other->item( 0 )->textContent, 'Rewrite URL default changed.' );
 };
 $tests['page denies anonymous users and rejects invalid POST nonces'] = static function () use ( $page ) {
 	$handler = static fn() => static function ( $message ) { throw new RCS_Admin_Boundary_Die( is_scalar( $message ) ? (string) $message : 'wp_die' ); };
