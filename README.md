@@ -136,13 +136,17 @@ An alias grants shortcode authors access to its endpoint. Anyone who can view th
 
 **Tools → Remote content** has five Free tabs:
 
-- **Builder** generates a shortcode from public settings, tests the request, and shows sanitized preview HTML. POST bodies entered here become post content when the generated shortcode is copied.
+- **Builder** keeps source settings, a sanitized preview and a copyable shortcode together. Select **Test content**, inspect the preview, then **Copy shortcode**. Settings stay filled after testing; **Generate shortcode** creates the code without fetching the source. POST bodies entered here become post content when the generated shortcode is copied.
 - **Connections** stores up to 32 encrypted credential aliases per site and lists read-only PHP aliases.
 - **Cache** shows active indexed entry and byte totals and clears an exact source URL or all plugin entries.
 - **Usage** lists local posts and pages containing the shortcode or block, 20 at a time. It does not fetch sources or display post content.
 - **Help** includes a copyable environment summary without source URLs, credentials or content.
 
 The shortcode, block, selectors, public GET cache, stale fallback, URL rewriting, Basic/Bearer/API-key connections and all five tabs are part of Free. Free works independently and has no license client or licensing-service dependency.
+
+![Desktop import editor with source settings, a tested preview and Copy shortcode](.wordpress-org/screenshot-1.png)
+
+<img src=".wordpress-org/screenshot-2.png" alt="Phone import editor with compact section navigation, source URL, CSS selector and Test and Generate actions" width="390">
 
 ### Remote Content Shortcode Pro
 

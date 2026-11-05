@@ -1,6 +1,6 @@
 # Troubleshooting imports
 
-Open **Tools → Remote content → Builder** as an administrator. Enter the source URL and the same selection, removal, rewriting, fallback, and credential alias settings used in your post, then select **Test content**. The preview includes a sanitized HTML source view. Select **Generate shortcode** to copy the public settings into a Shortcode block.
+Open **Tools → Remote content → Builder** as an administrator. Enter the source URL and the same selection, removal, rewriting, fallback, and credential alias settings used in your post, then select **Test content**. The editor shows a preview and shortcode together, with sanitized HTML source available below the preview. Select **Copy shortcode** and paste it into a Shortcode block. Your settings remain filled after submission. Use **Generate shortcode** when you want the code without fetching the source.
 
 The result shows the error code, HTTP status when available, matching element count, elapsed time, and a sanitized preview. Test requests always fetch fresh content and bypass visitor caching. Their timeout is limited to five seconds, plus system DNS resolution time. A post can therefore succeed with a longer timeout while the diagnostic request times out.
 

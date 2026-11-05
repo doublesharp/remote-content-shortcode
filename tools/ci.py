@@ -80,7 +80,7 @@ def check(name, arguments, timeout=30, environment=None, isolated=True):
                    'upgrade-verify', 'cve-regression', 'encoded-fallback', 'regression',
                    'integration-transport', 'features-integration', 'content-auth-features',
                    'cache-features', 'admin-block-features', 'transport', 'anonymous-rest-cache',
-                   'render-contexts', 'proxy-transport', 'cache-write', 'cache-read',
+                   'render-contexts', 'proxy-transport', 'cache-write', 'cache-read', 'admin-builder',
                    'cache-uninstall', 'regex-budget', 'cache-multisite', 'extension-api', 'free-admin'})
     covered = (name.startswith('pro-') and name != 'pro-lint') if PRO_COVERAGE else covered
     # Instrumentation and Docker lifecycle share this watchdog. Selector tests
@@ -214,7 +214,7 @@ try:
     for suite in ('regression', 'integration-transport', 'features-integration', 'content-auth-features',
                   'cache-features', 'admin-block-features', 'transport', 'content-boundaries',
                   'admin-cache-boundaries', 'renderer-boundaries', 'transport-boundaries',
-                  'extension-api', 'free-admin', 'free-platform-boundaries'):
+                  'extension-api', 'free-admin', 'admin-builder', 'free-platform-boundaries'):
         wp(suite, ['eval-file', f'/source/tests/{suite}.php'])
     if FAULT_TESTS:
         for suite in ('dependency-failures', 'transport-dependency-failures', 'free-platform-failures'):

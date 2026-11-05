@@ -52,6 +52,11 @@ jobs:
         run: python3 tools/release-version.py
       - name: Verify release asset publication safeguards
         run: timeout 30 python3 tests/release-assets.py
+      - name: Check administrator JavaScript
+        run: |
+          node --check inc/admin.js
+          node --check inc/admin-workspace.js
+          node tests/admin-copy.cjs
       - name: Run bounded Docker checks
         env:
           RCS_WORDPRESS_VERSION: ${{ matrix.wordpress }}

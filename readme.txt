@@ -48,7 +48,7 @@ Attributes:
 
 Insert the Remote content block and set its source URL, selectors, removal rule, fallback, credential alias, URL rewriting, and cache options in the block settings. The block imports with GET. Use the shortcode for POST requests. Editor previews can make remote requests and use the same security restrictions as frontend rendering. Store only a configured credential alias in a block, never a password or token.
 
-Administrators can open Tools > Remote content > Builder to generate a copyable shortcode or test an import. Diagnostics show HTTP status, cache status, selector match count, elapsed time, a sanitized preview and its HTML source. Administrator tests bypass caching and show a disabled cache status; they do not measure whether visitors have a cached response. Raw request error messages, credential values, and destination URLs are excluded from diagnostic output. Test requests use a timeout of at most five seconds, plus system DNS resolution time. Diagnostic input fields are cleared after submission. The generated shortcode intentionally contains the public settings entered for copying; do not include secrets in URLs, attributes or POST bodies.
+Administrators can open Tools > Remote content > Builder and select Test content to get a sanitized preview and a shortcode together, then use Copy shortcode. Generate shortcode creates the code without fetching the source. Entered settings remain filled after submission. Diagnostics show HTTP status, cache status, selector match count, elapsed time and sanitized HTML source. Administrator tests bypass caching and show a disabled cache status; they do not measure whether visitors have a cached response. Raw request error messages, credential values, and destination URLs are excluded from diagnostic output. Test requests use a timeout of at most five seconds, plus system DNS resolution time. The generated shortcode intentionally contains the public settings entered for copying; do not include secrets in URLs, attributes or POST bodies.
 
 The Connections tab manages encrypted credential aliases. The Cache tab displays active indexed entries and byte totals and can clear an exact source URL, including its query string, or all of this plugin's cache entries. Other WordPress caches are unaffected. The URL is normalized before matching; use the actual URL after any shortcode URL filter and forwarded parameters.
 
@@ -158,6 +158,11 @@ No. Version 2 blocks private destinations and renders only allowed post HTML. Us
 = Do I need Composer on my WordPress server? =
 
 No. The CSS selector dependency is bundled in the release. Its source and MIT license are included under inc/vendor/css-selector. See third-party.txt for the version and source information.
+
+== Screenshots ==
+
+1. Test an import and copy its shortcode from one workspace, with source settings beside the sanitized preview.
+2. Configure an import on a phone with compact section navigation, source and selector fields, and Test and Generate actions.
 
 == Upgrade Notice ==
 
