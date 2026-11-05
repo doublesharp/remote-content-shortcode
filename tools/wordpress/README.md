@@ -50,6 +50,15 @@ cron is visitor driven; use `wp cron event run --due-now` when testing it manual
 
 ## Hosted Entitle
 
+Production will use a single **Doublesharp** Entitle workspace, with Remote
+Content Shortcode Pro and Validated Field as separate products. Another agent
+is configuring that workspace. Its tenant API URL will be recorded here once
+confirmed; the workspace name alone does not establish its slug or endpoint.
+
+This local lab continues to use the existing sandbox below for test licenses,
+update releases and expiry checks. Sandbox releases and credentials stay scoped
+to that workspace.
+
 Pro's license screen is at **Tools → Remote content → Pro license**. Enter the
 workspace's tenant API, an issued key, and consent to activation. The equivalent
 private CLI flow is:
