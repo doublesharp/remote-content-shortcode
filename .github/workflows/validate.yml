@@ -52,6 +52,10 @@ jobs:
         run: python3 tools/release-version.py
       - name: Verify release asset publication safeguards
         run: timeout 30 python3 tests/release-assets.py
+      - name: Verify release ZIP source integrity
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: timeout 30 python3 -B tests/package-integrity.py
       - name: Check administrator JavaScript
         run: |
           node --check inc/admin.js

@@ -440,6 +440,7 @@ $old_user = get_current_user_id();
 $failures = 0;
 try {
 	foreach ( $tests as $name => $test ) {
+		Remote_Content_Shortcode_Budget::reset();
 		wp_set_current_user( 1 );
 		Remote_Content_Shortcode_Cache::clear();
 		try { $test(); echo "PASS $name\n"; } catch ( Throwable $error ) { ++$failures; echo "FAIL $name: " . $error->getMessage() . "\n"; }

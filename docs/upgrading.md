@@ -19,7 +19,10 @@ Version 2 changes how destinations, remote HTML, credentials, and selectors are 
 | Implicit credential lookup or plaintext `userpwd` values | Save a connection with an HTTPS origin, exact endpoint path and allowed methods, or configure a PHP alias with explicit storage. See the example below. Remove passwords or tokens saved in post content and rotate exposed credentials. |
 | Credential lookup using the ambient post's metadata | Configure an explicit positive integer `post_id` and a protected metadata key that is not REST-exposed, or move the credential to a constant or option. |
 | jQuery selectors such as `p:eq(0)` | Use supported CSS, for example `p:first-of-type` when the intended match is the first `p` sibling. CSS sibling positions and jQuery result-set indexes are different, so verify the selected output. |
-| Imported relative links and images | Set `rewrite_urls="true"` to resolve supported attributes against the final remote URL. CSS background URLs are not rewritten. |
+| Imported relative links and images | Set `rewrite_urls="true"` for links. Browser resources require an exact trusted HTTPS-origin grant; `srcset` is disabled. See the security reference. |
+| Imported inline styles, classes or IDs | Presentation attributes are removed. Apply styling through trusted local code. |
+| POST shortcodes | Grant repeat-safe endpoints through `remote_content_shortcode_allow_post_render`; credential method grants alone do not enable public POST rendering. |
+| Custom system resolver configuration | Define `REMOTE_CONTENT_DNS_SERVERS` with numeric resolver addresses when `/etc/resolv.conf` is unavailable. DNS shares the HTTP deadline. |
 | Compressed responses or proxy-only outbound access | Endpoints must support uncompressed responses over direct public connections. |
 | Very large documents, complex selectors, or unrestricted cache lifetimes | Use smaller fragments and simpler expressions. Fresh and stale lifetimes each have a maximum of one day; storage and processing have bounded limits. |
 

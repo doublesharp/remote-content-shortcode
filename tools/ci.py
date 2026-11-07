@@ -81,7 +81,8 @@ def check(name, arguments, timeout=30, environment=None, isolated=True):
                    'integration-transport', 'features-integration', 'content-auth-features',
                    'cache-features', 'admin-block-features', 'transport', 'anonymous-rest-cache',
                    'render-contexts', 'proxy-transport', 'cache-write', 'cache-read', 'admin-builder',
-                   'cache-uninstall', 'regex-budget', 'cache-multisite', 'extension-api', 'free-admin'})
+                   'cache-uninstall', 'regex-budget', 'cache-multisite', 'extension-api', 'free-admin',
+                   'audit-hardening', 'audit-dns', 'audit-transport', 'audit-concurrency'})
     covered = (name.startswith('pro-') and name != 'pro-lint') if PRO_COVERAGE else covered
     # Instrumentation and Docker lifecycle share this watchdog. Selector tests
     # still enforce their separate two-second budget for the actual work.
@@ -211,7 +212,7 @@ try:
     with zipfile.ZipFile(WORK / 'plugin-check.zip') as plugin_check:
         plugin_check.extractall(WP / 'wp-content/plugins')
     wp('install-plugin-check', ['plugin', 'activate', 'plugin-check'])
-    for suite in ('regression', 'integration-transport', 'features-integration', 'content-auth-features',
+    for suite in ('audit-hardening', 'audit-dns', 'audit-transport', 'audit-concurrency', 'regression', 'integration-transport', 'features-integration', 'content-auth-features',
                   'cache-features', 'admin-block-features', 'transport', 'content-boundaries',
                   'admin-cache-boundaries', 'renderer-boundaries', 'transport-boundaries',
                   'extension-api', 'free-admin', 'admin-builder', 'free-platform-boundaries'):

@@ -66,7 +66,23 @@ Only the named values from the current page's query string are forwarded. Here, 
 [remote_content url="https://example.com/public-search" method="POST"]search=example[/remote_content]
 ```
 
-POST responses are never cached, and POST redirects are refused.
+POST responses are never cached, and POST redirects are refused. Public rendering requires a trusted PHP grant for a read-only or idempotent endpoint:
+
+```php
+add_filter( 'remote_content_shortcode_allow_post_render', static function ( $allowed, $url, $alias ) {
+    return 'https://example.com/public-search' === $url && '' === $alias;
+}, 10, 3 );
+```
+
+Imported styling and automatic browser resources are removed by default. To permit images from a trusted HTTPS origin:
+
+```php
+add_filter( 'remote_content_shortcode_resource_origins', static function () {
+    return array( 'https://images.example.com' );
+} );
+```
+
+Granted resource URLs resolve against the remote page and remain subject to destination and count limits. See [the security reference](docs/security.md) for render budgets and DNS configuration.
 
 ### Display source or plain text
 

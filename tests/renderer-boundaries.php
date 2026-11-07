@@ -300,6 +300,8 @@ $failures = 0;
 $hooks = array( 'remote_content_shortcode_url', 'remote_content_shortcode_postfields', 'remote_content_shortcode_phpQuery', 'remote_content_shortcode_return', 'remote_content_shortcode_error', 'remote_content_shortcode_credentials', 'http_request_host_is_external' );
 try {
 	foreach ( $tests as $name => $test ) {
+		Remote_Content_Shortcode_Budget::reset();
+		add_filter( 'remote_content_shortcode_allow_post_render', '__return_true' );
 		$calls = array();
 		$reply = '<p>Boundary content</p>';
 		$_GET = array();
@@ -310,6 +312,7 @@ try {
 		catch ( Throwable $error ) { ++$failures; echo "FAIL $name: " . $error->getMessage() . "\n"; }
 	}
 } finally {
+	remove_filter( 'remote_content_shortcode_allow_post_render', '__return_true' );
 	foreach ( $hooks as $hook ) { remove_all_filters( $hook ); }
 	remove_filter( 'pre_http_request', $intercept, 10 );
 	Remote_Content_Shortcode_Cache::clear();

@@ -16,7 +16,7 @@ $intercept = function ( $pre, $args, $url ) use ( &$seen ) {
 	$data = '';
 	$type = 'GET';
 	do_action_ref_array( 'requests-requests.before_request', array( &$url, &$headers, &$data, &$type, &$options ) );
-	if ( WpOrg\Requests\Transport\Curl::class !== ( $options['transport'] ?? null ) || true !== ( $options['verifyname'] ?? false ) || ! is_file( $options['verify'] ?? '' ) ) {
+	if ( ! ( ( $options['transport'] ?? null ) instanceof Remote_Content_Shortcode_Transport ) || true !== ( $options['verifyname'] ?? false ) || ! is_file( $options['verify'] ?? '' ) ) {
 		throw new RuntimeException( 'Pinned cURL transport or certificate verification missing.' );
 	}
 	$handle = curl_init();

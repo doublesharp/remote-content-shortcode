@@ -255,9 +255,10 @@ $cb_cases['regex match count boundary is 1000'] = function () {
 	cb_error( Remote_Content_Shortcode_Regex::replace( '~x~', 'y', str_repeat( 'x', 1001 ) ), 'regex_output_too_large' );
 };
 $cb_cases['regex output boundary accounts for unmatched content'] = function () {
-	$replacement = str_repeat( 'x', 1048575 );
-	cb_check( $replacement . 'b' === Remote_Content_Shortcode_Regex::replace( '~a~', $replacement, 'ab' ), 'Exact maximum regex output rejected' );
-	cb_error( Remote_Content_Shortcode_Regex::replace( '~a~', $replacement . 'x', 'ab' ), 'regex_output_too_large' );
+	$replacement = str_repeat( 'x', 1048 );
+	$subject = str_repeat( 'a', 1000 ) . str_repeat( 'b', 576 );
+	cb_check( str_repeat( $replacement, 1000 ) . str_repeat( 'b', 576 ) === Remote_Content_Shortcode_Regex::replace( '~a~', $replacement, $subject ), 'Exact maximum regex output rejected' );
+	cb_error( Remote_Content_Shortcode_Regex::replace( '~a~', $replacement, $subject . 'b' ), 'regex_output_too_large' );
 };
 $cb_cases['regex replacement syntax follows PHP for escapes malformed and unmatched references'] = function () {
 	foreach ( array( '', '$', '\\', 'literal', '$x', '\\x', '${x}', '${123}', '${1', '${1}', '${2}', '$2', '\\2', '$99', '\\99', '\\$', '\\\\', '$1x', '$$1', '$01', '${01}' ) as $replacement ) {

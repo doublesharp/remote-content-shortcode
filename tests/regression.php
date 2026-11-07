@@ -25,6 +25,7 @@ function rcs_render( $atts = array(), $content = null ) {
 }
 
 function rcs_case( $name, $test ) {
+	Remote_Content_Shortcode_Budget::reset();
 	global $rcs_count, $rcs_failures, $rcs_requests, $rcs_response;
 	++$rcs_count;
 	$rcs_requests = array();
@@ -33,7 +34,7 @@ function rcs_case( $name, $test ) {
 	$_REQUEST = array();
 	wp_cache_flush();
 	if ( class_exists( 'Remote_Content_Shortcode_Cache' ) ) { Remote_Content_Shortcode_Cache::clear(); }
-	foreach ( array( 'remote_content_shortcode_credentials', 'remote_content_shortcode_return', 'remote_content_shortcode_phpQuery', 'remote_content_shortcode_url', 'remote_content_shortcode_postfields', 'remote_content_shortcode_error' ) as $hook ) {
+	foreach ( array( 'remote_content_shortcode_allow_post_render', 'remote_content_shortcode_credentials', 'remote_content_shortcode_return', 'remote_content_shortcode_phpQuery', 'remote_content_shortcode_url', 'remote_content_shortcode_postfields', 'remote_content_shortcode_error' ) as $hook ) {
 		remove_all_filters( $hook );
 	}
 	try {
@@ -131,6 +132,7 @@ rcs_case( 'regex expansion has a bounded replacement count', function () {
 rcs_case( 'replacement backreferences preserve PHP semantics', function () {
 	$GLOBALS['rcs_response'] = 'abc';
 	foreach ( array( '$1', '${2}', '\\3', '$0', '\\0', '\\$1', '\\\\1', '${99}', 'x$99y', '$12', '${1}2', '$$1' ) as $replacement ) {
+		Remote_Content_Shortcode_Budget::reset();
 		$expected = preg_replace( '~(a)(b)(c)~', $replacement, 'abc' );
 		$actual = rcs_render( array( 'find' => '~(a)(b)(c)~', 'replace' => $replacement ) );
 		rcs_assert( $expected === $actual, 'replacement differs from PHP: ' . $replacement );
@@ -205,8 +207,10 @@ rcs_case( 'encoded shortcode attributes and quote placeholders still work', func
 	rcs_assert( str_contains( $out, 'title="new"' ), 'attribute decoding or quote placeholder failed' );
 } );
 rcs_case( 'POST responses are not shared through cache', function () {
+	add_filter( 'remote_content_shortcode_allow_post_render', '__return_true' );
 	rcs_render( array( 'cache' => 'true', 'method' => 'POST' ), 'first' );
 	rcs_render( array( 'cache' => 'true', 'method' => 'POST' ), 'second' );
+	remove_filter( 'remote_content_shortcode_allow_post_render', '__return_true' );
 	rcs_assert( 2 === count( $GLOBALS['rcs_requests'] ) && 'second' === $GLOBALS['rcs_requests'][1]['args']['body'], 'POST response reused' );
 } );
 rcs_case( 'forwarded values cannot inject query arguments', function () {
@@ -256,6 +260,7 @@ rcs_case( 'oversized remote responses are rejected', function () {
 	rcs_assert( '' === rcs_render(), 'oversized body was accepted' );
 } );
 rcs_case( 'POST redirects are refused', function () {
+	add_filter( 'remote_content_shortcode_allow_post_render', '__return_true' );
 	$GLOBALS['rcs_response'] = fn() => array( 'headers' => array( 'location' => 'https://example.org/next' ), 'body' => '', 'response' => array( 'code' => 302 ) );
 	rcs_assert( '' === rcs_render( array( 'method' => 'POST' ), 'private body' ) && 1 === count( $GLOBALS['rcs_requests'] ), 'POST redirect was allowed' );
 } );

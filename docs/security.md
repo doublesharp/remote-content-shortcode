@@ -4,19 +4,21 @@ Remote Content Shortcode fetches content when a post or page is rendered. Any vi
 
 ## Request destinations
 
-Only absolute public HTTP and HTTPS URLs are accepted. Local files, non-HTTP schemes, URL-embedded passwords, loopback addresses, private networks, link-local addresses, shared address space, and other nonglobal addresses are rejected. WordPress's safe HTTP port restrictions also apply.
+Only absolute public HTTP and HTTPS URLs on ports 80, 443 or 8080 are accepted. Local files, non-HTTP schemes, URL-embedded passwords, loopback addresses, private networks, link-local addresses, shared address space, ambiguous numeric IP aliases, and other nonglobal addresses are rejected.
 
-The destination is normalized using the same URL parser as WordPress Requests. WordPress's safe HTTP validator requires an IPv4 address record; IPv6-only DNS names and literal IPv6 URLs are unsupported. For accepted hosts, all returned IPv4 and IPv6 addresses are checked, and a public IPv4 address is selected and pinned in the cURL transport. The original hostname remains in the Host header and TLS SNI and is used for certificate verification. A hostname cannot pass the public-address check and then resolve to an unchecked private destination during that connection.
+The destination is normalized using the same URL parser as WordPress Requests. Hostnames need a public IPv4 record; IPv6-only names and literal IPv6 URLs are unsupported. The plugin queries numeric resolvers from `/etc/resolv.conf` directly over deadline-bound UDP, with TCP fallback for truncated replies. Hosts with another resolver configuration can define `REMOTE_CONTENT_DNS_SERVERS` as an array of up to three numeric resolver addresses. Missing or malformed resolver configuration fails closed. CNAME traversal, packet sizes and record counts are bounded. All returned IPv4 and IPv6 addresses are checked, and a public IPv4 address is pinned in cURL. The original hostname remains in the Host header and TLS SNI and is used for certificate verification. No blocking system DNS lookup is repeated by the HTTP wrapper.
 
 The request fails closed if a Requests hook changes its URL or HTTP method. The pin and TLS options are enforced after ordinary cURL hooks, and the peer address is checked after connecting. Successful responses require the protected transport to have run. WordPress pre_http_request integrations may provide an offline response without making a network connection through this plugin.
 
-GET requests can follow up to three redirects. Each destination is normalized, validated, and pinned independently. Authenticated requests and POST requests do not follow redirects. Requests use a shared timeout budget across redirects, from 1 to 30 seconds; system DNS resolution may add time outside that budget.
+GET requests can follow up to three redirects. Each destination is normalized, validated, and pinned independently. Authenticated requests and POST requests do not follow redirects. Requests share a timeout budget across DNS, redirects and transfer, from 1 to 30 seconds.
 
 WordPress proxy routing is refused, and environment proxy settings are disabled for these requests. Private intranet imports and proxy-only outbound networking are not supported. The former URL-bypass constants and SSL-verification filters are not honored.
 
 ## HTML and resource limits
 
 The final HTML passes through `wp_kses_post()` after CSS selection, element removal, regular expression replacement, entity encoding, and the return filter. This removes markup WordPress does not permit in post content, including scripts and inline event handlers. There is no shortcode attribute that disables sanitization.
+
+Imported `style`, `class`, and `id` attributes are removed. Automatic browser subresources are disabled by default: `src`, `srcset`, `poster` and legacy background attributes are removed. Trusted PHP can grant exact HTTPS origins through `remote_content_shortcode_resource_origins`. Granted `src` and `poster` URLs resolve against the remote response URL and are limited to 32 per fragment. Same-site, private-literal, local and non-HTTPS destinations are refused. A grant explicitly trusts that origin's DNS and browser resources; use only origins intended for the page's visitors. `srcset` remains disabled. Ordinary links require a visitor action and retain KSES protocol checks.
 
 `htmlentities="true"` displays source as escaped text. `strip_tags="true"` returns text and removes script and style content. Remote HTML is never executed as PHP. Optional fallback HTML is limited to 4,096 bytes and sanitized separately when the import fails or produces empty output; it is never evaluated as a shortcode.
 
@@ -28,7 +30,9 @@ Before evaluating any CSS selector, a linear document walk rejects more than 2,0
 
 These are conservative compatibility limits, including for adjacent sibling selectors and pseudo-classes that generate sibling axes. With no removal selector, `main p` at depth 20 is limited to 894 total elements, while `h2 + p` is limited to 200 elements. Counts include parser-created wrappers. Selection and removal share a budget of 32 million work units, so additional expressions reduce the available budget. Use sibling selectors on small fragments; simple tag and class selections can use the full document limit, subject to depth and selector limits.
 
-The cURL transfer-progress callback returns an abort signal when downloaded bytes reach the limit, including unknown-length responses on supported older cURL versions. Declared oversized responses are also rejected using cURL's file-size limit. Requests retains at most 1 MiB of body data. Network requests retain their configured timeout; DNS resolution remains outside a strict application-level deadline.
+The cURL transfer-progress callback aborts when downloaded bytes reach the limit, including unknown-length responses on supported older cURL versions. Declared oversized responses are also rejected using cURL's file-size limit. Requests retains at most 1 MiB of body data. Headers are limited to 64 KiB and 128 lines across response blocks before Requests retains them. Entity expansion and final filter output must fit a 1 MiB output ceiling. Each regex receives PCRE match and depth limits of 10,000 and 128 while restoring ambient PHP settings after each replacement.
+
+One PHP request may render at most 32 plugin instances, return at most 4 MiB of aggregate plugin output, and initiate at most eight fetches within a shared 30-second network deadline. Cache hits count toward rendering and output limits. Long-lived PHP workers must call `Remote_Content_Shortcode_Budget::reset()` at each actual request boundary. SyntaxHighlighter subjects are limited to 256 KiB and four shortcode matches, with local PCRE limits; unrelated encoded delimiters remain unchanged.
 
 Invalid input, failed requests, unsuccessful HTTP statuses, unsupported selectors, and invalid regular expressions return empty output. Server-side code can observe the `remote_content_shortcode_error` action. Its URL argument can contain sensitive query values and must be handled accordingly; diagnostic listeners should never print raw error details to visitors.
 
@@ -44,6 +48,8 @@ Metadata credentials require an explicit integer post_id and a protected metadat
 
 Only explicitly named query-string values are forwarded through `params`. They are URL-encoded and must be scalar strings. Cookies and incoming POST parameters are excluded. Visitor cookies and inbound Authorization headers are not forwarded. Enclosed shortcode content is sent as the body only for POST.
 
+`params` is limited to 4,096 bytes and 64 names; visitor values are limited to 4,096 bytes before processing. Duplicate names use their first occurrence. POST rendering is refused unless trusted PHP returns exactly `true` from `remote_content_shortcode_allow_post_render` for the URL and alias. Grant only read-only or idempotent operations intended to run on every public, preview and REST render. Programmatic `fetch_source()` remains available for explicitly authorized add-on operations; callers own action authorization.
+
 ## Caching
 
 Only unauthenticated GET results for logged-out visitors, including public REST-rendered content are cached. Logged-in requests, editor previews, and administrator diagnostics bypass caching so they cannot evict public visitor entries. The key includes the final URL with forwarded parameters, request configuration, WordPress site, and current WordPress user. Raw successful responses are cached so each render still applies its own selectors, replacements, filters, and final sanitization. Request failures, including DNS validation failures, are cached for up to 60 seconds or the configured cache lifetime if shorter. Cached errors contain only a sanitized error code, with no transport message or data. They return empty output unless fallback content is configured and notify diagnostic listeners. POST, authenticated requests, and requests with cache=false are not cached.
@@ -52,9 +58,17 @@ Caching uses an external WordPress object cache when installed, otherwise expiri
 
 stale_ttl defaults to zero. When enabled, a cached unauthenticated GET can reuse its last successful raw response for up to 86,400 additional seconds if a refresh fails. Negative cache entries preserve that success without extending its original deadline. POST, authenticated requests, and cache=false cannot use stale content. Stale responses use the same site/user/request identity and rerun transformations and sanitization. Cache keys also include requested fresh and stale lifetimes.
 
+Four fixed per-site fetch slots bound in-flight work across visitors, including uncached and credentialed fetches. Duplicate in-flight requests are refused without waiting; eligible stale responses or configured fallback content can be returned. A slot is held until the cache result is stored. Admission metadata contains only hashed keys and ownership tokens. Abandoned slots expire after 35 seconds; stale owners cannot release replacement leases.
+
 Administrators can invalidate one exact normalized request URL or all plugin entries through Tools > Remote content > Cache. URL matching uses the actual request URL after forwarded parameters and URL filters; the clearing form does not run those transformations again. Both forms require manage_options and a valid nonce. Other caches are untouched. Diagnostic requests use the protected renderer and report only bounded status fields, a sanitized preview, and allowlisted error codes. They do not echo raw transport errors, source URLs, query values, or credentials. Administrator diagnostics bypass caching and cap their timeout at five seconds; they do not measure visitor cache hits. The builder's generated shortcode intentionally contains the public configuration supplied for copying. Shortcode diagnostic actions remain server-side hooks and require the separate precautions described above.
 
 Uninstall removes plugin cache metadata, payloads and managed connection records on each site. It preserves credential constants, external credential options, protected metadata and unrelated cache data. Deactivation preserves the plugin's settings and managed connections.
+
+## Release authority
+
+Publication accepts protected numeric tag pushes only and uses the `wordpress-release` GitHub environment. Manual checks use the read-only validation workflow. Restrict numeric-tag creation, changes and deletion to release administrators, require a trusted environment reviewer, disable administrator approval bypass, restrict the environment to release tags, and store `WORDPRESS_RELEASE_PASSWORD` only in that environment. Remove the old repository-level `SVN_PASSWORD` secret. Naming an environment in YAML alone does not configure its protections. For this single-administrator repository, `doublesharp` is the required reviewer and can approve its own runs; approval remains mandatory.
+
+The packager image is pinned by digest. Before extraction or publication, an independent Python verifier checks the ZIP's exact inventory, entry types, sizes and bytes against the reviewed checkout. Checksums and SVN comparisons supplement this source comparison.
 
 ## Free and extension boundaries
 

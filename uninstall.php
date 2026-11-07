@@ -26,6 +26,7 @@ function remote_content_shortcode_uninstall_cache_site() {
 	} while ( 100 === count( $names ) && $removed > 0 );
 	delete_option( 'rcs_v2_cache_index' );
 	delete_option( 'rcs_v2_cache_lock' );
+	for ( $slot = 0; $slot < 4; ++$slot ) { delete_option( 'rcs_v3_fetch_slot_' . $slot ); }
 	delete_option( 'rcs_connections_v1' );
 	delete_option( 'rcs_connections_v1_lock' );
 }

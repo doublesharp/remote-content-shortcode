@@ -21,11 +21,14 @@ $tests['fallback sanitizes failures and empty selections'] = static function () 
 	$assert( '0' === $render( array( 'fallback' => 'Offline' ) ), 'Zero content replaced by fallback.' );
 };
 $tests['relative URLs use final redirected URL, including cached responses'] = static function () use ( &$response, &$calls, $render, $assert ) {
+	$grant = static fn() => array( 'https://example.com' );
+	add_filter( 'remote_content_shortcode_resource_origins', $grant );
 	$response = static fn( $url ) => str_ends_with( $url, '/content' ) ? array( 'body' => '', 'headers' => array( 'location' => '/dir/page' ), 'response' => array( 'code' => 302 ) ) : array( 'body' => '<a href="next">Next</a><img src="/image.png">', 'headers' => array(), 'response' => array( 'code' => 200 ) );
 	$a = $render( array( 'rewrite_urls' => 'true', 'cache' => 'true' ) );
 	$b = $render( array( 'rewrite_urls' => 'true', 'cache' => 'true' ) );
 	$assert( $a === $b && str_contains( $a, 'https://example.com/dir/next' ) && str_contains( $a, 'https://example.com/image.png' ) && 2 === count( $calls ), 'Final URL metadata was lost.' );
 	$assert( str_contains( $render(), 'href="next"' ), 'Relative rewriting unexpectedly enabled by default.' );
+	remove_filter( 'remote_content_shortcode_resource_origins', $grant );
 };
 $tests['bounded stale fallback survives a negative cache and reruns sanitization'] = static function () use ( &$response, &$calls, $render, $assert ) {
 	$atts = array( 'cache' => 'true', 'cache_ttl' => 1, 'stale_ttl' => 30 );
@@ -83,7 +86,8 @@ $tests['editor and logged-in renders cannot evict visitor cache entries'] = stat
 	$atts = array( 'url' => 'https://example.com/visitor', 'cache' => 'true' );
 	$render( $atts );
 	wp_set_current_user( 1 );
-	for ( $i = 0; $i < 35; ++$i ) { $render( array( 'url' => 'https://example.com/preview-' . $i, 'cache' => 'true' ) ); }
+	for ( $i = 0; $i < 35; ++$i ) { Remote_Content_Shortcode_Budget::reset(); $render( array( 'url' => 'https://example.com/preview-' . $i, 'cache' => 'true' ) ); }
+	Remote_Content_Shortcode_Budget::reset();
 	wp_set_current_user( 0 );
 	$render( $atts );
 	$assert( 36 === count( $calls ), 'Editor requests evicted anonymous cache data.' );
@@ -91,6 +95,7 @@ $tests['editor and logged-in renders cannot evict visitor cache entries'] = stat
 $failures = 0;
 $old_user = get_current_user_id();
 foreach ( $tests as $name => $test ) {
+	Remote_Content_Shortcode_Budget::reset();
 	$calls = array(); $response = '<p>Hello</p>'; wp_set_current_user( 0 );
 	if ( class_exists( 'Remote_Content_Shortcode_Cache' ) ) { Remote_Content_Shortcode_Cache::clear(); }
 	try { $test(); echo "PASS $name\n"; } catch ( Throwable $error ) { ++$failures; echo "FAIL $name: " . $error->getMessage() . "\n"; }

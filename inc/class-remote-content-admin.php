@@ -14,7 +14,7 @@ class Remote_Content_Shortcode_Admin {
 	public static function field_help( $key ) {
 		$help = array(
 			'url' => __( 'Public HTTP(S) page or API endpoint to import.', 'remote-content-shortcode' ),
-			'method' => __( 'GET reads content. POST sends the body below and is never cached.', 'remote-content-shortcode' ),
+			'method' => __( 'GET reads content. POST sends the body below, is never cached, and requires a trusted grant for a repeat-safe endpoint.', 'remote-content-shortcode' ),
 			'timeout' => __( 'Maximum wait in seconds, from 1 to 30.', 'remote-content-shortcode' ),
 			'userpwd' => __( 'Use a saved connection alias from Connections or OAuth connections. Never enter a password here.', 'remote-content-shortcode' ),
 			'params' => __( 'Forward only these visitor query parameters, separated by commas. Use language=en to provide a default.', 'remote-content-shortcode' ),

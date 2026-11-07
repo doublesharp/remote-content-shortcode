@@ -22,6 +22,8 @@ $response = $core->fetch_source(
 
 The API uses the core public-destination checks, DNS pinning, TLS verification, method restrictions, credential scope, redirect policy and response-size limits. It always fetches without using the visitor response cache. It does not set a JSON Content-Type header automatically. Configure service-specific behavior in trusted code where required.
 
+Fetches also share the PHP request's network budget and per-site admission slots. `request_busy` means another matching fetch is pending or all slots are occupied; defer background work to another bounded job. Rendering a POST through a shortcode, preview or REST response additionally requires `remote_content_shortcode_allow_post_render` to return exactly `true` for its URL and alias. Programmatic fetch callers must authorize their own operations.
+
 With `$content_filters` enabled, it forwards explicitly named `params` values from the current request and applies `remote_content_shortcode_url` and `remote_content_shortcode_postfields`. Pass false for stored or scheduled sources that must use their saved URL and body without ambient request context. Credential resolution and all transport restrictions still apply.
 
 The response body contains raw transport bytes. Validate JSON before using its data, and escape values when rendering them. Do not echo a raw fetch result as HTML.
@@ -42,6 +44,8 @@ if ( ! is_wp_error( $response ) ) {
 ```
 
 `render_fetched($response, $attributes)` accepts a previously verified response envelope and scalar transformation settings. It checks the body size and URL shape, then uses the shared selection/removal, replacement, URL rewriting, tag stripping, entity encoding and final `wp_kses_post()` pipeline. It does not fetch the source again or consume `fallback` as the shortcode wrapper does. Invalid envelopes or transformations return empty output. Add-ons remain responsible for permission checks, source ownership and validating any persisted envelope.
+
+Rendered snapshots share the request's instance and output budgets. Remote `style`, `class` and `id` attributes are removed. Browser resources require a trusted exact HTTPS-origin grant through `remote_content_shortcode_resource_origins`; this filter receives the origin array and final source URL. The grant permits bounded `src` and `poster` URLs, while `srcset` stays disabled. See [the output and resource policy](security.md#html-and-resource-limits).
 
 ## Credentials
 

@@ -8,6 +8,48 @@ class Remote_Content_Shortcode_Cache {
 	const LOCK = 'rcs_v2_cache_lock';
 	const MAX_ENTRIES = 32;
 	const MAX_BYTES = 8388608;
+	const FETCH_SLOTS = 'rcs_v3_fetch_slot_';
+
+	/** Four fixed slots bound both active work and abandoned admission metadata. */
+	public static function acquire_fetch( $key ) {
+		$token = self::lock();
+		if ( false === $token ) { return false; }
+		try {
+			global $wpdb;
+			$slots = array(); $hash = hash( 'sha256', $key ); $now = time();
+			for ( $id = 0; $id < 4; ++$id ) {
+				$name = self::FETCH_SLOTS . $id;
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Admission reads must bypass stale option caches.
+				$raw = $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", $name ) );
+				$slot = is_string( $raw ) ? maybe_unserialize( $raw ) : false;
+				if ( is_array( $slot ) && ( $slot['expires'] ?? 0 ) > $now ) {
+					if ( ( $slot['key'] ?? '' ) === $hash ) { return false; }
+					$slots[ $id ] = $slot;
+				} elseif ( is_string( $raw ) ) { self::remove_fetch_slot( $id, $raw ); }
+			}
+			for ( $id = 0; $id < 4; ++$id ) {
+				if ( isset( $slots[ $id ] ) ) { continue; }
+				$lease = array( 'id' => $id, 'token' => wp_generate_uuid4(), 'expires' => $now + 35, 'key' => $hash );
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Atomic insertion checks that this allocator still owns the mutation lock.
+				$inserted = $wpdb->query( $wpdb->prepare( "INSERT IGNORE INTO {$wpdb->options} (option_name, option_value, autoload) SELECT %s, %s, 'off' FROM {$wpdb->options} AS owner WHERE owner.option_name = %s AND owner.option_value = %s", self::FETCH_SLOTS . $id, maybe_serialize( $lease ), self::LOCK, $token ) );
+				wp_cache_delete( self::FETCH_SLOTS . $id, 'options' ); wp_cache_delete( 'notoptions', 'options' );
+				return 1 === $inserted ? $lease : false;
+			}
+			return false;
+		} finally { self::unlock( $token ); }
+	}
+	public static function release_fetch( $lease ) {
+		$id = $lease['id'] ?? null;
+		if ( ! is_int( $id ) || $id < 0 || $id > 3 ) { return; }
+		self::remove_fetch_slot( $id, maybe_serialize( $lease ) );
+	}
+	private static function remove_fetch_slot( $id, $value ) {
+		global $wpdb;
+		$name = self::FETCH_SLOTS . $id;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Independent ownership-checked release never needs the allocation/cache mutex.
+		$wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->options} WHERE option_name = %s AND option_value = %s", $name, $value ) );
+		wp_cache_delete( $name, 'options' ); wp_cache_delete( 'notoptions', 'options' );
+	}
 
 	private static function id( $key ) { return 'rcs_v2_' . hash( 'sha256', (string) $key ); }
 	private static function read( $id ) {

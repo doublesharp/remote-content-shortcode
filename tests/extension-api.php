@@ -38,8 +38,9 @@ try {
 	}
 	$user = get_current_user_id();
 	wp_set_current_user( get_user_by( 'login', 'rcs_admin' )->ID );
+	add_filter( 'remote_content_shortcode_allow_post_render', '__return_true' );
 	try { $diagnosis = $plugin->diagnose( array( 'url' => 'https://source.rcs.test/', 'method' => 'POST' ), 'diagnostic=body' ); }
-	finally { wp_set_current_user( $user ); }
+	finally { remove_filter( 'remote_content_shortcode_allow_post_render', '__return_true' ); wp_set_current_user( $user ); }
 	$last = end( $requests );
 	ea_assert( is_array( $diagnosis ) && 'diagnostic=body' === $last[1]['body'], 'Diagnostics dropped the builder POST body.' );
 } finally { remove_filter( 'pre_http_request', $offline, 10 ); }

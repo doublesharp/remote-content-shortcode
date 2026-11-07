@@ -15,6 +15,7 @@ SELECTORS = ('small-select', 'large-select', 'large-remove', 'flat', 'complex-se
 STARTUPS = ('missing-dom', 'missing-curl', 'missing-connect-option', 'direct-main',
             'direct-html', 'direct-regex')
 CASES = {
+    'audit-hardening', 'audit-dns', 'audit-transport', 'audit-concurrency',
     'upgrade-verify', 'cve-regression', 'encoded-fallback', 'regression',
     'integration-transport', 'features-integration', 'content-auth-features',
     'cache-features', 'admin-block-features', 'transport', 'content-boundaries',

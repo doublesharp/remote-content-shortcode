@@ -26,13 +26,21 @@ class Remote_Content_Shortcode_Regex {
 			$size += strlen( $result ) - strlen( $matches[0] );
 			return $result;
 		};
+		$backtrack = ini_get( 'pcre.backtrack_limit' ); $depth = ini_get( 'pcre.recursion_limit' );
 		try {
+			if ( ! is_string( $pattern ) || strlen( $pattern ) < 2 || strlen( $pattern ) > 1024 || strlen( $replacement ) > 4096 ) { return new WP_Error( 'invalid_regex' ); }
+			// Embedded LIMIT verbs can override earlier verbs. The temporary engine ceiling
+			// prevents a supplied pattern raising our limit; finally restores the caller's settings.
+			ini_set( 'pcre.backtrack_limit', (string) min( 10000, (int) $backtrack ) );
+			ini_set( 'pcre.recursion_limit', (string) min( 128, (int) $depth ) );
+			if ( (int) ini_get( 'pcre.backtrack_limit' ) > 10000 || (int) ini_get( 'pcre.recursion_limit' ) > 128 ) { return new WP_Error( 'invalid_regex' ); }
+			$pattern = $pattern[0] . '(*LIMIT_MATCH=10000)(*LIMIT_DEPTH=128)' . substr( $pattern, 1 );
 			// phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- Invalid user patterns become diagnostic errors.
 			$result = @preg_replace_callback( $pattern, $callback, $subject, 1001 );
 			return null === $result ? new WP_Error( 'invalid_regex' ) : $result;
 		} catch ( LengthException $error ) {
 			return new WP_Error( 'regex_output_too_large' );
-		}
+		} finally { ini_set( 'pcre.backtrack_limit', $backtrack ); ini_set( 'pcre.recursion_limit', $depth ); }
 	}
 
 	private static function expand( $replacement, $matches, $available ) {

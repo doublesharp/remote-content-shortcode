@@ -100,7 +100,7 @@ Basic authentication is the default. To send a stored token as a Bearer credenti
 
 = External requests and limits =
 
-The shortcode is registered in frontend, administration, and REST contexts. Requests happen when it is rendered, including editor previews and REST-rendered post content. The same request, credential, and output restrictions apply in every context. The destination is the URL configured in that shortcode, plus any explicitly forwarded query values or POST body. Credentials are sent only through a configured alias. No telemetry or developer service is contacted by the plugin.
+The shortcode is registered in frontend, administration, and REST contexts. Requests happen when it is rendered, including editor previews and REST-rendered post content. POST rendering requires a trusted PHP grant for a repeat-safe endpoint. Imported styling and automatic browser resources are disabled by default; trusted PHP can grant exact HTTPS resource origins. See docs/security.md for configuration and processing limits. The destination is the configured URL plus explicitly forwarded query values or POST body. Credentials are sent only through a configured alias. No telemetry or developer service is contacted by the plugin.
 
 The site owner is responsible for authorization to reproduce remote content and for checking the destination service's terms and privacy policy. Visitors' cookies and incoming Authorization headers are not forwarded.
 
